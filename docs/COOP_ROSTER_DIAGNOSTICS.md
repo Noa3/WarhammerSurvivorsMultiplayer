@@ -266,6 +266,79 @@ exception persisted. The owned game and controller exited normally. No hint
 state/parent change, component substitution or page operation was attempted;
 the original generic argument and throwing operand remain unmeasured.
 
+## Actor and input discovery
+
+### Equipment inventory observation
+
+`equipment:<pid>` separately invokes `PlayerStateReader.read_equipment` during a
+running scene, without requiring an upgrade page. It reads each captured main
+actor's canonical `WeaponsManager.ActiveEquipment` list through public getters,
+with at most four actors and 32 entries per actor. A missing manager, null list,
+valid empty list and null element remain distinct. A non-null element reports
+its actual runtime class, canonical `WeaponType`, whether it inherits `Weapon`,
+and `Equipment.Owner` compared with the same rooted actor references. `ownerSlot`
+is `-1` for null, `-2` for an owner outside those actors, or the exact actor slot.
+
+`equipment` in the result has `state` and `actors`; captured actor rows include
+manager/list presence and ordered `items`. Item fields `referencePresent`,
+`fieldsObserved`, `isWeapon`, `weaponType`, `ownerReferencePresent`, `ownerSlot`
+and `runtimeType` distinguish observed values from defaults. This is managed
+reference/class/ownership observation, **not Unity object liveness, a weapon
+attack or damage attribution**. No item is added or changed.
+
+Duplicate actor references/input IDs, incompatible closed list or getter
+metadata, overlarge lists, failed roots/invocations and detected count/reference
+or run changes refuse the complete inventory. Caller output remains untouched
+on Error/NotReady. Equal-size mutations and native getter effects are not ruled
+out. Error, unavailable and unrelated commands suppress stale inventory values.
+
+Canonical equipment declarations and getters remain assembly-bound; an actual
+subclass may live in another game assembly if it is assignable to that exact
+canonical base. This is a trusted-runtime compatibility check, not admission of
+hostile plugins or colliding metadata.
+
+In an authorized single-instance target check on version 2.1.6/build 26581996,
+two paused captures identified `Wilson.Objects.Weapons.ShieldOfFaithWeapon`
+(type 5016) as owned by the Sister in slot 0 and
+`Wilson.Objects.Weapons.BoltgunWeapon` (type 5000) as owned by Luca in slot 1.
+Both actors retained their requested hero and input IDs. The startup query
+returned NotReady; an unrelated profile query suppressed the inventory before
+the second capture. The game closed normally. These are ownership observations,
+not independent movement, automatic weapon-hit attribution or network gameplay.
+
+### Rewired input-profile discovery
+
+`inputProfile:<pid>` invokes the separate `read_rewired_input_profile` function
+on the verified Unity main thread. It checks `ReInput.isReady`, finds exactly
+one active `InputManager_Base`, and reads its `UserData` custom-controller
+definition IDs and each definition's axis identifiers. It also queries actual
+action IDs for the native-consumed names `Move Horizontal` and `Move Vertical`.
+No controller, map or input value is created or changed. Optional input metadata
+is not required by ordinary scene, upgrade or equipment queries.
+
+Captured `inputProfile` JSON contains `managerCount`, `horizontalActionId`,
+`verticalActionId` and `definitions` (`sourceId` / `axisIds`). An action ID of
+`-1` means no matching action. A valid empty definition list is a complete
+negative within the 16-definition bound; a definition with fewer than two axes
+is observed, not automatically suitable for movement. Each definition is limited
+to 32 unique nonnegative axis IDs. Source definition ID, controller instance ID,
+axis index, axis identifier and action ID are different namespaces.
+
+Unready input, no active manager or null UserData returns NotReady. Multiple
+managers, invalid metadata, null arrays/definitions, duplicates, negative IDs,
+overlarge arrays and getter failures refuse the capture. Error/NotReady preserve
+the caller snapshot and expose no stale profile. This discovery is not a proof
+of controller assignment, mapping validity, update timing, player isolation,
+movement or network gameplay. The runtime and invoked getters remain trusted;
+the observation is not a guaranteed atomic engine snapshot.
+
+The same target build exposed source definitions 0 and 1, each with axis IDs
+0 and 1, and movement action IDs 0 and 1. These values were queried in both menu
+and run observations; they are not hardcoded defaults or category/layout IDs.
+No custom controller was created, assigned or driven in these checks. The
+existing one-shot window-message callback is not a proven frame or Rewired
+update hook, so this profile does not establish an input-injection timing path.
+
 ## Mutation boundaries
 
 Enrollment validates actual public `AddPlayer(Rewired.Player)` metadata. Exact

@@ -20,7 +20,20 @@ EXPECTED_CASES = {"no_manager", "null_stage", "empty_players", "two_players", "p
                   "upgrade_items_removed_component", "upgrade_hint_fourth_child", "upgrade_hint_null",
                   "upgrade_hint_foreign", "upgrade_hint_destroyed", "upgrade_hint_no_selection",
                   "upgrade_hint_wrong_thread", "upgrade_hint_late_error", "upgrade_hint_stopped",
-                  "upgrade_hint_over_bound", "upgrade_hint_empty_selected"}
+                  "upgrade_hint_over_bound", "upgrade_hint_empty_selected", "equipment_cross_image_contract", "equipment_two_owners",
+                  "equipment_null_manager", "equipment_null_collection", "equipment_empty_collection",
+                  "equipment_null_owner", "equipment_foreign_owner", "equipment_non_weapon", "equipment_at_bound",
+                  "equipment_over_bound", "equipment_late_owner_error", "equipment_changing_count", "equipment_count_callback",
+                  "equipment_count_reject_other_error", "equipment_wrong_thread",
+                  "equipment_stopped", "equipment_duplicate_actor", "equipment_duplicate_input",
+                  "equipment_over_player_cap", "equipment_null_stage", "equipment_no_manager",
+                  "input_profile_no_manager", "input_profile_two_definitions", "input_profile_not_ready",
+                  "input_profile_wrong_native", "input_profile_wrong_managed", "input_profile_empty_definitions",
+                  "input_profile_null_ids", "input_profile_duplicate_source", "input_profile_negative_source",
+                  "input_profile_missing_definition", "input_profile_late_axis_error", "input_profile_null_axes",
+                  "input_profile_duplicate_axis", "input_profile_negative_axis", "input_profile_one_axis",
+                  "input_profile_axes_at_bound", "input_profile_axes_over_bound", "input_profile_definitions_at_bound",
+                  "input_profile_definitions_over_bound", "input_profile_missing_action", "input_profile_duplicate_managers"}
 root=os.path.abspath(os.path.join(os.path.dirname(__file__),"..",".."))
 local=os.path.join(root,".local")
 player=os.environ.get("WSM_PLAYER_STATE_PLAYER","player-state-v1-player4")

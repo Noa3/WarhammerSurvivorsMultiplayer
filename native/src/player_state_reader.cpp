@@ -16,7 +16,7 @@ struct PlayerStateReader::Impl {
     Il2CppApi a; MainThreadGuard guard; DWORD os=0; std::int32_t managed=0;
     Il2CppClass *manager=nullptr,*character=nullptr,*sprite=nullptr,*stage=nullptr,*input=nullptr,*float2=nullptr,*character_enum=nullptr,*stage_enum=nullptr;
     Il2CppClass *intclass=nullptr,*singleclass=nullptr,*boolclass=nullptr;
-    Il2CppDomain* domain=nullptr;
+    Il2CppDomain* domain=nullptr; HMODULE module=nullptr;
     const MethodInfo *find=nullptr,*array_item=nullptr,*players=nullptr,*stage_get=nullptr,*hp=nullptr,*dead=nullptr,*xp=nullptr,*level=nullptr,*kind=nullptr,*player_input=nullptr,*position=nullptr,*input_id=nullptr,*stage_type=nullptr,*running=nullptr;
     FieldInfo *fx=nullptr,*fy=nullptr;
     Il2CppClass* (*parent)(Il2CppClass*)=nullptr;
@@ -106,7 +106,7 @@ void PlayerStateReader::test_use_wrong_equipment_collection() {
 bool PlayerStateReader::initialize(HMODULE module,Il2CppApi api,Il2CppDomain* domain,DWORD native_thread,std::int32_t managed_thread,std::string& error){
     impl_.reset(); error.clear();
     if(!module||!domain||!native_thread||!api.thread_current||!api.thread_current()||!api.domain_get_assemblies||!api.assembly_get_image||!api.image_get_name||!api.image_get_class_count||!api.image_get_class||!api.class_get_name||!api.class_get_namespace||!api.class_get_methods||!api.method_get_name||!api.method_get_param_count||!api.method_get_param||!api.method_get_return_type||!api.method_get_flags||!api.type_get_name||!api.free||!api.class_get_type||!api.type_get_object||!api.array_length||!api.runtime_invoke||!api.object_get_class||!api.object_unbox){error="Incomplete runtime API or thread not attached";return false;}
-    auto p=std::make_unique<Impl>(); p->a=api;p->os=native_thread;p->managed=managed_thread;p->domain=domain;
+    auto p=std::make_unique<Impl>(); p->a=api;p->os=native_thread;p->managed=managed_thread;p->domain=domain;p->module=module;
 #define LOAD(member,name) p->member=reinterpret_cast<decltype(p->member)>(GetProcAddress(module,name)); if(!p->member){error=std::string("Missing export ")+name;return false;}
     LOAD(parent,"il2cpp_class_get_parent"); LOAD(enum_base,"il2cpp_class_enum_basetype");
     LOAD(field_by_name,"il2cpp_class_get_field_from_name");LOAD(field_flags,"il2cpp_field_get_flags");LOAD(field_type,"il2cpp_field_get_type");LOAD(field_parent,"il2cpp_field_get_parent");LOAD(field_value,"il2cpp_field_get_value");
@@ -187,6 +187,199 @@ PlayerReadStatus PlayerStateReader::read(SceneStateSnapshot& output,std::string&
         if(!std::isfinite(s.x)||!std::isfinite(s.y)||!std::isfinite(s.hp)||!std::isfinite(s.xp)){error="Non-finite player value";return PlayerReadStatus::Error;}
         result.players.push_back(s);
     }
+    output=std::move(result);return PlayerReadStatus::Captured;
+}
+
+PlayerReadStatus PlayerStateReader::read_equipment(EquipmentSnapshot& output,std::string& error) const {
+    error.clear();
+    if(!impl_){error="Reader not initialized";return PlayerReadStatus::Error;}
+    const auto& p=*impl_;
+    const auto fail=[&](const char* message){error=message;return PlayerReadStatus::Error;};
+    MainThreadIdentity identity;
+    if(!p.guard.verify(p.os,p.managed,identity,error))return PlayerReadStatus::Error;
+    Impl::Root manager_type(p,p.a.type_get_object(p.a.class_get_type(p.manager)));
+    if(!manager_type.get())return fail("Unable to root manager type");
+    void* find_args[]={manager_type.get()};
+    Impl::Root array(p,p.invoke(p.find,nullptr,find_args,error));
+    if(!error.empty())return PlayerReadStatus::Error;
+    if(!array.get())return fail("Unable to root manager lookup array");
+    auto array_class=p.a.object_get_class(array.get());auto element=p.element_class(array_class);
+    if(!element||(!p.assignable(p.manager,element)&&!p.assignable(element,p.manager)))return fail("Invalid manager lookup array type");
+    auto length=p.a.array_length(reinterpret_cast<Il2CppArray*>(array.get()));
+    if(!length)return PlayerReadStatus::NotReady;
+    if(length!=1)return fail("Ambiguous GameManager instances");
+    std::int32_t zero=0;void* index[]={&zero};
+    Impl::Root manager(p,p.invoke(p.array_item,array.get(),index,error));
+    if(!error.empty())return PlayerReadStatus::Error;
+    if(!p.is_a(manager.get(),p.manager))return fail("Invalid manager instance");
+    std::uint8_t running=0;
+    if(!p.value(p.invoke(p.running,manager.get(),nullptr,error),p.boolclass,running,error))return PlayerReadStatus::Error;
+    if(running>1)return fail("Invalid run-state Boolean");
+    if(!running)return PlayerReadStatus::NotReady;
+    auto raw_stage=p.invoke(p.stage_get,manager.get(),nullptr,error);
+    if(!error.empty())return PlayerReadStatus::Error;
+    if(!raw_stage)return PlayerReadStatus::NotReady;
+    Impl::Root stage(p,raw_stage);
+    if(!p.is_a(stage.get(),p.stage))return fail("Unable to root valid Stage");
+
+    // Equipment metadata is deliberately resolved only for this opt-in read.
+    auto method_class=reinterpret_cast<Il2CppClass* (*)(const MethodInfo*)>(GetProcAddress(p.module,"il2cpp_method_get_class"));
+    if(!method_class)return fail("Missing export il2cpp_method_get_class");
+    const char* game="VampireSurvivors.Runtime.dll";
+    const auto game_class=[&](const char* ns,const char* name){return p.klass(p.domain,game,ns,name);};
+    auto weapons=game_class("VampireSurvivors.Objects","CharacterWeaponsManager");
+    auto manager_base=game_class("VampireSurvivors.Objects","EquipmentManager");
+    auto equipment=game_class("VampireSurvivors.Objects","Equipment");
+    auto weapon=game_class("VampireSurvivors.Objects.Weapons","Weapon");
+    auto weapon_type=game_class("VampireSurvivors.Data","WeaponType");
+    auto enum_class=p.klass(p.domain,"mscorlib.dll","System","Enum");
+    if(!weapons||!manager_base||!equipment||!weapon||!weapon_type||!enum_class||
+       !p.image_for_class(weapons,game)||!p.image_for_class(manager_base,game)||!p.image_for_class(equipment,game)||
+       !p.image_for_class(weapon,game)||!p.image_for_class(weapon_type,game)||
+       p.parent(weapons)!=manager_base||p.parent(weapon)!=equipment||p.parent(weapon_type)!=enum_class)
+        return fail("Invalid canonical equipment classes or inheritance");
+    auto underlying=p.enum_base(weapon_type);
+    if(!p.type(underlying,"System.Int32")||p.class_from_type(underlying)!=p.intclass)return fail("Invalid WeaponType underlying type");
+    constexpr const char* equip_name="VampireSurvivors.Objects.Equipment";
+    constexpr const char* equip_list="System.Collections.Generic.List<VampireSurvivors.Objects.Equipment>";
+    auto get_manager=p.method(p.character,"get_WeaponsManager","VampireSurvivors.Objects.CharacterWeaponsManager");
+    auto get_collection=p.method(manager_base,"get_ActiveEquipment",equip_list);
+    auto get_owner=p.method(equipment,"get_Owner",kCharacter);
+    auto get_type=p.method(equipment,"get_Type","VampireSurvivors.Data.WeaponType");
+    const auto returns=[&](const MethodInfo* m,Il2CppClass* declaring,Il2CppClass* result){
+        return m&&method_class(m)==declaring&&p.class_from_type(p.a.method_get_return_type(m))==result;
+    };
+    auto collection_class=get_collection?p.class_from_type(p.a.method_get_return_type(get_collection)):nullptr;
+    if(!returns(get_manager,p.character,weapons)||!returns(get_owner,equipment,p.character)||
+       !returns(get_type,equipment,weapon_type)||!returns(get_collection,manager_base,collection_class)||
+       !collection_class||!p.image_for_class(collection_class,"mscorlib.dll")||
+       !eq(p.a.class_get_namespace(collection_class),"System.Collections.Generic")||!eq(p.a.class_get_name(collection_class),"List`1"))
+        return fail("Invalid canonical equipment getter metadata");
+    auto equipment_count=p.method(collection_class,"get_Count","System.Int32");
+    auto equipment_item=p.method(collection_class,"get_Item",equip_name,"System.Int32");
+    if(!returns(equipment_count,collection_class,p.intclass)||!returns(equipment_item,collection_class,equipment)||
+       p.class_from_type(p.a.method_get_param(equipment_item,0))!=p.intclass)
+        return fail("Invalid closed equipment list methods");
+    auto raw_list=p.invoke(p.players,manager.get(),nullptr,error);
+    if(!error.empty())return PlayerReadStatus::Error;
+    if(!raw_list)return PlayerReadStatus::NotReady;
+    Impl::Root list(p,raw_list);
+    auto list_class=list.get()?p.a.object_get_class(list.get()):nullptr;
+    auto expected_list=p.class_from_type(p.a.method_get_return_type(p.players));
+    if(!list_class||list_class!=expected_list||!p.image_for_class(list_class,"mscorlib.dll")||
+       !p.type(p.a.class_get_type(list_class),kList))return fail("Invalid MainPlayers list");
+    auto count_get=p.method(list_class,"get_Count","System.Int32");
+    auto item_get=p.method(list_class,"get_Item",kCharacter,"System.Int32");
+    if(!returns(count_get,list_class,p.intclass)||!returns(item_get,list_class,p.character)||
+       p.class_from_type(p.a.method_get_param(item_get,0))!=p.intclass)return fail("Invalid MainPlayers list methods");
+    const auto get_count=[&](const MethodInfo* method,Il2CppObject* object,std::int32_t& count){
+        return p.integer32(p.invoke(method,object,nullptr,error),count,error);
+    };
+    std::int32_t count=0;if(!get_count(count_get,list.get(),count))return PlayerReadStatus::Error;
+    if(!count)return PlayerReadStatus::NotReady;
+    if(count<0||count>kMaximumPlayers)return fail("MainPlayers count outside supported bound");
+    EquipmentSnapshot result;
+    std::vector<std::unique_ptr<Impl::Root>> actors;
+    for(std::int32_t i=0;i<count;++i) {
+        std::int32_t current=0;if(!get_count(count_get,list.get(),current))return PlayerReadStatus::Error;
+        if(current!=count)return fail("MainPlayers count changed");
+        void* args[]={&i};auto raw=p.invoke(item_get,list.get(),args,error);
+        if(!error.empty())return PlayerReadStatus::Error;
+        auto actor=std::make_unique<Impl::Root>(p,raw);
+        if(!p.is_a(actor->get(),p.character))return fail("Invalid MainPlayers actor");
+        for(const auto& previous:actors)if(previous->get()==actor->get())return fail("Duplicate MainPlayers actor");
+        EquipmentActorSnapshot row;row.slot=i;
+        if(!p.value(p.invoke(p.kind,actor->get(),nullptr,error),p.character_enum,row.character_type,error))return PlayerReadStatus::Error;
+        Impl::Root input(p,p.invoke(p.player_input,actor->get(),nullptr,error));
+        if(!error.empty())return PlayerReadStatus::Error;
+        if(!p.is_a(input.get(),p.input))return fail("Invalid actor input");
+        if(!p.integer32(p.invoke(p.input_id,input.get(),nullptr,error),row.input_id,error))return PlayerReadStatus::Error;
+        if(row.input_id<0)return fail("Negative actor input ID");
+        for(const auto& previous:result.actors)if(previous.input_id==row.input_id)return fail("Duplicate actor input ID");
+        actors.push_back(std::move(actor));result.actors.push_back(std::move(row));
+    }
+    // Retain all roots until the observation completes, including earlier collections.
+    std::vector<std::unique_ptr<Impl::Root>> managers,collections;
+    std::vector<std::int32_t> sizes;
+    for(std::int32_t i=0;i<count;++i) {
+        auto& row=result.actors[i];
+        auto raw_manager=p.invoke(get_manager,actors[i]->get(),nullptr,error);
+        if(!error.empty())return PlayerReadStatus::Error;
+        auto wm=std::make_unique<Impl::Root>(p,raw_manager);
+        if(raw_manager&&!p.is_a(wm->get(),weapons))return fail("Invalid weapons manager reference");
+        row.manager_present=raw_manager!=nullptr;
+        Il2CppObject* raw_collection=nullptr;
+        if(raw_manager){raw_collection=p.invoke(get_collection,wm->get(),nullptr,error);if(!error.empty())return PlayerReadStatus::Error;}
+        auto collection=std::make_unique<Impl::Root>(p,raw_collection);
+        if(raw_collection&&(!collection->get()||p.a.object_get_class(collection->get())!=collection_class))return fail("Invalid equipment collection reference");
+        row.collection_present=raw_collection!=nullptr;
+        std::int32_t size=0;
+        if(raw_collection) {
+            if(!get_count(equipment_count,collection->get(),size))return PlayerReadStatus::Error;
+            if(size<0||size>32)return fail("Equipment count outside supported bound");
+            for(std::int32_t j=0;j<size;++j) {
+                std::int32_t current=0;if(!get_count(equipment_count,collection->get(),current))return PlayerReadStatus::Error;
+                if(current!=size)return fail("Equipment count changed");
+                void* args[]={&j};auto raw=p.invoke(equipment_item,collection->get(),args,error);
+                if(!error.empty())return PlayerReadStatus::Error;
+                Impl::Root item(p,raw);EquipmentItemSnapshot entry;
+                if(raw) {
+                    if(!p.is_a(item.get(),equipment))return fail("Invalid equipment item reference");
+                    auto actual=p.a.object_get_class(item.get());
+                    // Game-specific subclasses may use a different image; canonical base identity is required above.
+                    auto ns=p.a.class_get_namespace(actual);auto name=p.a.class_get_name(actual);
+                    if(!ns||!name)return fail("Missing equipment runtime class name");
+                    const auto bounded_length=[](const char* text){std::size_t n=0;while(n<=512&&text[n])++n;return n;};
+                    auto nslen=bounded_length(ns),namelen=bounded_length(name);
+                    if(!namelen||nslen>512||namelen>512||nslen+namelen+(nslen?1:0)>512)return fail("Equipment runtime class name outside bound");
+                    entry.runtime_type=nslen?std::string(ns)+"."+name:std::string(name);
+                    entry.reference_present=true;entry.is_weapon=p.is_a(item.get(),weapon);
+                    if(!p.value(p.invoke(get_type,item.get(),nullptr,error),weapon_type,entry.weapon_type,error))return PlayerReadStatus::Error;
+                    auto raw_owner=p.invoke(get_owner,item.get(),nullptr,error);
+                    if(!error.empty())return PlayerReadStatus::Error;
+                    Impl::Root owner(p,raw_owner);
+                    if(raw_owner) {
+                        if(!p.is_a(owner.get(),p.character))return fail("Invalid equipment owner reference");
+                        entry.owner_present=true;entry.owner_slot=-2;
+                        for(std::int32_t k=0;k<count;++k)if(owner.get()==actors[k]->get())entry.owner_slot=k;
+                    }
+                    entry.fields_observed=true;
+                }
+                row.items.push_back(std::move(entry));
+            }
+            std::int32_t current=0;if(!get_count(equipment_count,collection->get(),current))return PlayerReadStatus::Error;
+            if(current!=size)return fail("Equipment count changed");
+        }
+        sizes.push_back(size);managers.push_back(std::move(wm));collections.push_back(std::move(collection));
+    }
+    // Recheck references and counts; equal counts cannot detect same-size mutations.
+    for(std::int32_t i=0;i<count;++i) {
+        auto raw=p.invoke(get_manager,actors[i]->get(),nullptr,error);if(!error.empty())return PlayerReadStatus::Error;
+        if(raw!=managers[i]->get())return fail("Weapons manager changed during observation");
+        if(raw) {
+            auto collection=p.invoke(get_collection,managers[i]->get(),nullptr,error);if(!error.empty())return PlayerReadStatus::Error;
+            if(collection!=collections[i]->get())return fail("Equipment collection changed during observation");
+            if(collection){std::int32_t current=0;if(!get_count(equipment_count,collections[i]->get(),current))return PlayerReadStatus::Error;if(current!=sizes[i])return fail("Equipment count changed");}
+        }
+    }
+    std::int32_t final_count=0;if(!get_count(count_get,list.get(),final_count))return PlayerReadStatus::Error;
+    if(final_count!=count)return fail("MainPlayers count changed");
+    auto final_list=p.invoke(p.players,manager.get(),nullptr,error);if(!error.empty())return PlayerReadStatus::Error;
+    if(final_list!=list.get())return fail("MainPlayers reference changed");
+    auto final_stage=p.invoke(p.stage_get,manager.get(),nullptr,error);if(!error.empty())return PlayerReadStatus::Error;
+    if(final_stage!=stage.get())return fail("Stage changed during observation");
+    if(!p.value(p.invoke(p.running,manager.get(),nullptr,error),p.boolclass,running,error))return PlayerReadStatus::Error;
+    if(running!=1)return fail("Run state changed during observation");
+    void* final_find_args[]={manager_type.get()};
+    Impl::Root final_array(p,p.invoke(p.find,nullptr,final_find_args,error));
+    if(!error.empty())return PlayerReadStatus::Error;
+    if(!final_array.get())return fail("Unable to root final manager lookup array");
+    auto final_element=p.element_class(p.a.object_get_class(final_array.get()));
+    if(!final_element||(!p.assignable(p.manager,final_element)&&!p.assignable(final_element,p.manager))||
+       p.a.array_length(reinterpret_cast<Il2CppArray*>(final_array.get()))!=1)return fail("Manager lookup changed during observation");
+    Impl::Root final_manager(p,p.invoke(p.array_item,final_array.get(),index,error));
+    if(!error.empty())return PlayerReadStatus::Error;
+    if(!p.is_a(final_manager.get(),p.manager)||final_manager.get()!=manager.get())return fail("Manager changed during observation");
     output=std::move(result);return PlayerReadStatus::Captured;
 }
 

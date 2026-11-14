@@ -6,7 +6,18 @@ using CharacterController = VampireSurvivors.Objects.Characters.CharacterControl
 // Original fixture contracts for metadata-based reference inspection only.
 namespace VampireSurvivors.Objects
 {
-    [Preserve] public class Equipment { }
+    [Preserve] public class Equipment
+    {
+        public CharacterController owner;
+        public VampireSurvivors.Data.WeaponType kind;
+        public bool throwOnOwner;
+        public System.Action onReadOwner;
+        [Preserve] public CharacterController Owner
+        {
+            get { if(throwOnOwner)throw new System.InvalidOperationException("Fixture owner failure");onReadOwner?.Invoke();return owner; }
+        }
+        [Preserve] public VampireSurvivors.Data.WeaponType Type => kind;
+    }
     [Preserve] public class EquipmentManager
     {
         [field: Preserve] public List<Equipment> ActiveEquipment { get; set; } = new List<Equipment>();

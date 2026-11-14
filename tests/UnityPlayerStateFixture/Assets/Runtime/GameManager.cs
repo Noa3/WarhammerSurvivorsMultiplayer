@@ -9,6 +9,7 @@ namespace VampireSurvivors.Objects.Characters {
   [Preserve] private VampireSurvivors.Objects.CharacterWeaponsManager _weaponsManager;
   [Preserve] private VampireSurvivors.Objects.CharacterAccessoriesManager _accessoriesManager;
   public void ConfigureManagers(VampireSurvivors.Objects.CharacterWeaponsManager weapons, VampireSurvivors.Objects.CharacterAccessoriesManager accessories) { _weaponsManager=weapons; _accessoriesManager=accessories; }
+  [Preserve] public VampireSurvivors.Objects.CharacterWeaponsManager WeaponsManager => _weaponsManager;
   [Preserve] public float CurrentHp=>hp; [Preserve] public float Xp=>xp; [Preserve] public bool IsDead=>dead; [Preserve] public int Level=>level;
   [Preserve] public VampireSurvivors.Data.CharacterType CharacterType=>kind; [Preserve] public Rewired.Player PlayerInput=>input;
  }

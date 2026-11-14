@@ -10,6 +10,17 @@ struct PlayerStateSnapshot {
     bool dead = false;
 };
 struct SceneStateSnapshot { std::int32_t stage_type = 0; std::vector<PlayerStateSnapshot> players; };
+struct EquipmentItemSnapshot {
+    bool reference_present = false, is_weapon = false, fields_observed = false, owner_present = false;
+    std::int32_t weapon_type = 0, owner_slot = -1;
+    std::string runtime_type;
+};
+struct EquipmentActorSnapshot {
+    std::int32_t slot = 0, input_id = 0, character_type = 0;
+    bool manager_present = false, collection_present = false;
+    std::vector<EquipmentItemSnapshot> items;
+};
+struct EquipmentSnapshot { std::vector<EquipmentActorSnapshot> actors; };
 struct UpgradeActorContext {
     std::int32_t slot = 0, input_id = 0, character_type = 0;
     bool weapons_manager_present = false, accessories_manager_present = false;
@@ -54,6 +65,10 @@ public:
     bool initialize(HMODULE module, Il2CppApi api, Il2CppDomain* domain, DWORD native_thread,
                     std::int32_t managed_thread, std::string& error);
     [[nodiscard]] PlayerReadStatus read(SceneStateSnapshot& output, std::string& error) const;
+    // Separate opt-in managed-reference inventory: at most 32 equipment entries per actor.
+    // Owner slot is -1 for null and -2 for an owner outside the captured MainPlayers.
+    // This neither establishes Unity liveness nor proves a weapon hit.
+    [[nodiscard]] PlayerReadStatus read_equipment(EquipmentSnapshot& output, std::string& error) const;
     // Explicit diagnostic only. Presence means a managed reference, not Unity native-object liveness.
     // Optional metadata is resolved here, never required by normal initialize/read.
     [[nodiscard]] PlayerReadStatus read_upgrade_context(UpgradeContextSnapshot& output, std::string& error) const;

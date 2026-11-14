@@ -71,3 +71,30 @@ assert hints[0]['upgradeContext']['fourthOptionHint'] == {
     'childComparisonComplete': True, 'childSlot': 1,
 }
 print('PASS actual native hint JSON: explicit query, typed reference/liveness/comparison flags and child slot')
+equipment = [json.loads(s.removeprefix('ROSTER_EQUIPMENT_JSON ')) for s in result.stdout.splitlines()
+             if s.startswith('ROSTER_EQUIPMENT_JSON ')]
+assert len(equipment) == 1 and equipment[0]['action'] == 'equipment'
+assert equipment[0]['equipment'] == {
+    'state': 'captured',
+    'actors': [{'slot': 1, 'inputId': 52, 'characterType': 91,
+                'managerReferencePresent': True, 'collectionReferencePresent': True,
+                'items': [
+                    {'referencePresent': True, 'isWeapon': True, 'fieldsObserved': True,
+                     'weaponType': 7002, 'ownerReferencePresent': True, 'ownerSlot': 1,
+                     'runtimeType': 'Weapons.Quoted"Name'},
+                    {'referencePresent': False, 'isWeapon': False, 'fieldsObserved': False,
+                     'weaponType': 0, 'ownerReferencePresent': False, 'ownerSlot': -1,
+                     'runtimeType': ''},
+                ]}],
+}
+assert equipment[0]['upgradeContext'] == {'state': 'not_requested', 'actors': []}
+print('PASS actual native equipment JSON: typed owner identity, runtime class escaping and absent item defaults')
+profiles = [json.loads(s.removeprefix('ROSTER_INPUT_PROFILE_JSON ')) for s in result.stdout.splitlines()
+            if s.startswith('ROSTER_INPUT_PROFILE_JSON ')]
+assert len(profiles) == 1 and profiles[0]['action'] == 'inputProfile'
+assert profiles[0]['inputProfile'] == {
+    'state': 'captured', 'managerCount': 1, 'horizontalActionId': 101, 'verticalActionId': 103,
+    'definitions': [{'sourceId': 7, 'axisIds': [2, 9]}, {'sourceId': 11, 'axisIds': []}],
+}
+assert profiles[0]['equipment'] == {'state': 'not_requested', 'actors': []}
+print('PASS actual native input profile JSON: typed source/axis/action IDs, valid empty axes and opt-in boundaries')

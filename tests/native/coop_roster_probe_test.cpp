@@ -31,6 +31,18 @@ int main(int argc, char** argv) {
     check("own PID explicit hint query",parse_command("upgradeHint:1234",1234,hint_command) && hint_command.action==RosterAction::upgrade_hint);
     check("wrong PID explicit hint query",!parse_command("upgradeHint:1235",1234,hint_command));
     check("hint query cannot enter mutation dispatch",!mutates_roster(RosterAction::upgrade_hint));
+    RosterCommand equipment_command;
+    check("own PID explicit equipment query",parse_command("equipment:1234",1234,equipment_command) && equipment_command.action==RosterAction::equipment && equipment_command.player==-1);
+    check("wrong PID explicit equipment query",!parse_command("equipment:1235",1234,equipment_command));
+    check("equipment query cannot enter mutation dispatch",!mutates_roster(RosterAction::equipment));
+    RosterCommand profile_command;
+    check("own PID explicit input profile query",parse_command("inputProfile:1234",1234,profile_command)&&profile_command.action==RosterAction::input_profile&&profile_command.player==-1);
+    check("wrong PID explicit input profile query",!parse_command("inputProfile:1235",1234,profile_command));
+    check("input profile cannot enter mutation dispatch",!mutates_roster(RosterAction::input_profile));
+    for(const auto* value:{"inputProfile:","inputProfile:-1234","inputProfile:1234:0","inputProfile:1234\nrollback:1234"})
+        check(value,!parse_command(value,1234,profile_command));
+    for(const auto* value:{"equipment:","equipment:-1234","equipment:1234:0","equipment:1234\nrollback:1234"})
+        check(value,!parse_command(value,1234,equipment_command));
     for(const auto* text:{"upgradeHint:","upgradeHint:-1234","upgradeHint:1234:0","upgradeHint:1234\nrollback:1234"})
         check(text,!parse_command(text,1234,hint_command));
     for(const auto* text:{"upgradeItems:","upgradeItems:-1234","upgradeItems:1234:0","upgradeItems:1234\nrollback:1234"})
@@ -131,6 +143,35 @@ int main(int argc, char** argv) {
         c.command={action,-1};c.upgrade_status=PlayerReadStatus::Captured;hint_json=result_json(c,19);
         check("less detailed query never exposes stale hint observation",hint_json.find("\"fourthOptionHint\"")==std::string::npos);
     }
+    c.command={RosterAction::equipment,-1};c.equipment_status=PlayerReadStatus::Captured;
+    EquipmentActorSnapshot inventory;inventory.slot=1;inventory.input_id=52;inventory.character_type=91;
+    inventory.manager_present=true;inventory.collection_present=true;
+    inventory.items={{true,true,true,true,7002,1,"Weapons.Quoted\"Name"},{false,false,false,false,0,-1,""}};
+    c.equipment.actors={inventory};
+    auto equipment_json=result_json(c,20);
+    check("equipment query serializes own action and owner",equipment_json.find("\"action\":\"equipment\"")!=std::string::npos &&
+        equipment_json.find("\"equipment\":{\"state\":\"captured\",\"actors\":[")!=std::string::npos &&
+        equipment_json.find("\"ownerSlot\":1")!=std::string::npos);
+    std::cout << "ROSTER_EQUIPMENT_JSON " << equipment_json << '\n';
+    c.equipment_status=PlayerReadStatus::Error;equipment_json=result_json(c,21);
+    check("equipment error suppresses stale inventory",equipment_json.find("\"equipment\":{\"state\":\"error\",\"actors\":[]}")!=std::string::npos);
+    c.equipment_status=PlayerReadStatus::NotReady;equipment_json=result_json(c,22);
+    check("equipment not ready suppresses stale inventory",equipment_json.find("\"equipment\":{\"state\":\"not_ready\",\"actors\":[]}")!=std::string::npos);
+    c.command={RosterAction::inspect,-1};c.equipment_status=PlayerReadStatus::Captured;equipment_json=result_json(c,23);
+    check("ordinary inspection never exposes stale equipment",equipment_json.find("\"equipment\":{\"state\":\"not_requested\",\"actors\":[]}")!=std::string::npos);
+    c.command={RosterAction::input_profile,-1};c.input_profile_status=PlayerReadStatus::Captured;
+    c.input_profile.manager_count=1;c.input_profile.horizontal_action_id=101;c.input_profile.vertical_action_id=103;
+    c.input_profile.definitions={{7,{2,9}},{11,{}}};
+    auto profile_json=result_json(c,24);
+    check("input profile serializes definitions and actual actions",profile_json.find("\"action\":\"inputProfile\"")!=std::string::npos&&
+        profile_json.find("\"inputProfile\":{\"state\":\"captured\",\"managerCount\":1,\"horizontalActionId\":101,\"verticalActionId\":103,\"definitions\":[{\"sourceId\":7,\"axisIds\":[2,9]},{\"sourceId\":11,\"axisIds\":[]}]}")!=std::string::npos);
+    std::cout << "ROSTER_INPUT_PROFILE_JSON " << profile_json << '\n';
+    c.input_profile_status=PlayerReadStatus::Error;profile_json=result_json(c,25);
+    check("input profile error suppresses stale definitions",profile_json.find("\"inputProfile\":{\"state\":\"error\"}")!=std::string::npos);
+    c.input_profile_status=PlayerReadStatus::NotReady;profile_json=result_json(c,26);
+    check("input profile not ready suppresses stale definitions",profile_json.find("\"inputProfile\":{\"state\":\"not_ready\"}")!=std::string::npos);
+    c.command={RosterAction::inspect,-1};c.input_profile_status=PlayerReadStatus::Captured;profile_json=result_json(c,27);
+    check("ordinary inspection never exposes stale input profile",profile_json.find("\"inputProfile\":{\"state\":\"not_requested\"}")!=std::string::npos);
     if (!std::filesystem::create_directory(directory)) return 2;
     try {
         const auto request = directory / "request";

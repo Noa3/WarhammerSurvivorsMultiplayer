@@ -1,6 +1,7 @@
 #include "wsm/coop_roster_probe.h"
 #include "wsm/coop_roster.h"
 #include "wsm/player_observer.h"
+#include "wsm/rewired_input_profile.h"
 #include "wsm/window_hook.h"
 #include <charconv>
 #include <filesystem>
@@ -14,7 +15,7 @@
 
 namespace wsm {
 namespace {
-enum class RosterAction { inspect, enroll, rollback, select_player, copy_character, upgrade_context, upgrade_selection, upgrade_items, upgrade_hint };
+enum class RosterAction { inspect, enroll, rollback, select_player, copy_character, upgrade_context, upgrade_selection, upgrade_items, upgrade_hint, equipment, input_profile };
 struct RosterCommand { RosterAction action = RosterAction::inspect; std::int32_t player = -1; };
 bool mutates_roster(RosterAction action) {
     return action==RosterAction::enroll || action==RosterAction::rollback ||
@@ -30,6 +31,16 @@ bool parse_command(std::string_view text, DWORD expected_pid, RosterCommand& out
     while (!text.empty() && (text.back() == '\r' || text.back() == '\n')) text.remove_suffix(1);
     RosterCommand result;
     if (text == "inspect") { output = result; return true; }
+    constexpr std::string_view profile_prefix="inputProfile:";
+    if(text.substr(0,profile_prefix.size())==profile_prefix) {
+        DWORD pid=0;if(!number(text.substr(profile_prefix.size()),pid)||pid!=expected_pid)return false;
+        result.action=RosterAction::input_profile;output=result;return true;
+    }
+    constexpr std::string_view equipment_prefix="equipment:";
+    if(text.substr(0,equipment_prefix.size())==equipment_prefix) {
+        DWORD pid=0;if(!number(text.substr(equipment_prefix.size()),pid)||pid!=expected_pid)return false;
+        result.action=RosterAction::equipment;output=result;return true;
+    }
     constexpr std::string_view context_prefix="upgradeContext:";
     constexpr std::string_view selection_prefix="upgradeSelection:";
     constexpr std::string_view items_prefix="upgradeItems:";
@@ -131,6 +142,9 @@ void publish_result(const std::filesystem::path& path, const std::string& text) 
         throw std::runtime_error("Cannot publish roster output without replacing existing bytes");
 }
 struct ProbeContext {
+    HMODULE module = nullptr;
+    Il2CppApi api;
+    Il2CppDomain* domain = nullptr;
     CoopRoster roster;
     PlayerStateReader player;
     MainThreadGuard guard;
@@ -141,10 +155,14 @@ struct ProbeContext {
     bool configuration_captured = false;
     SceneStateSnapshot scene;
     UpgradeContextSnapshot upgrade;
+    EquipmentSnapshot equipment;
+    RewiredInputProfileSnapshot input_profile;
     MainThreadIdentity identity;
     CoopRosterStatus status = CoopRosterStatus::Error;
     PlayerReadStatus player_status = PlayerReadStatus::Error;
     PlayerReadStatus upgrade_status = PlayerReadStatus::Error;
+    PlayerReadStatus equipment_status = PlayerReadStatus::Error;
+    PlayerReadStatus input_profile_status = PlayerReadStatus::Error;
     bool action_succeeded = false;
     std::string error;
     std::string action_error, roster_error, configuration_error, player_error, upgrade_error;
@@ -158,6 +176,12 @@ void execute_command(void* raw) {
             c.upgrade_status=c.command.action==RosterAction::upgrade_hint?c.player.read_upgrade_hint(c.upgrade,c.upgrade_error):c.command.action==RosterAction::upgrade_items?c.player.read_upgrade_items(c.upgrade,c.upgrade_error):c.command.action==RosterAction::upgrade_selection?
                 c.player.read_upgrade_selection(c.upgrade,c.upgrade_error):c.player.read_upgrade_context(c.upgrade,c.upgrade_error);
             c.action_succeeded=c.upgrade_status==PlayerReadStatus::Captured;
+        } else if(c.command.action==RosterAction::input_profile) {
+            c.input_profile_status=read_rewired_input_profile(c.module,c.api,c.domain,c.window.thread,0,c.input_profile,c.action_error);
+            c.action_succeeded=c.input_profile_status==PlayerReadStatus::Captured;
+        } else if(c.command.action==RosterAction::equipment) {
+            c.equipment_status=c.player.read_equipment(c.equipment,c.action_error);
+            c.action_succeeded=c.equipment_status==PlayerReadStatus::Captured;
         } else if (mutates_roster(c.command.action)) {
             // This supplements, but does not replace, the trusted operator's
             // explicit outside-run precondition: NotReady can have other causes.
@@ -177,8 +201,8 @@ void execute_command(void* raw) {
         if (c.command.action == RosterAction::inspect) c.action_succeeded = c.status == CoopRosterStatus::Captured;
         c.error = !c.action_error.empty() ? c.action_error : !c.roster_error.empty() ? c.roster_error :
             !c.configuration_error.empty() ? c.configuration_error : !c.upgrade_error.empty() ? c.upgrade_error : c.player_error;
-    } catch (const std::exception& e) { c.error = c.action_error = e.what(); c.status = CoopRosterStatus::Error; c.upgrade_status=PlayerReadStatus::Error; c.action_succeeded = false; c.configuration_captured = false; }
-    catch (...) { c.error = c.action_error = "Unknown native roster callback failure"; c.status = CoopRosterStatus::Error; c.upgrade_status=PlayerReadStatus::Error; c.action_succeeded = false; c.configuration_captured = false; }
+    } catch (const std::exception& e) { c.error = c.action_error = e.what(); c.status = CoopRosterStatus::Error; c.upgrade_status=PlayerReadStatus::Error; c.equipment_status=PlayerReadStatus::Error; c.input_profile_status=PlayerReadStatus::Error; c.action_succeeded = false; c.configuration_captured = false; }
+    catch (...) { c.error = c.action_error = "Unknown native roster callback failure"; c.status = CoopRosterStatus::Error; c.upgrade_status=PlayerReadStatus::Error; c.equipment_status=PlayerReadStatus::Error; c.input_profile_status=PlayerReadStatus::Error; c.action_succeeded = false; c.configuration_captured = false; }
 }
 std::string quoted_json(std::string_view value) {
     static constexpr char hex[] = "0123456789abcdef";
@@ -193,7 +217,7 @@ std::string quoted_json(std::string_view value) {
 }
 std::string result_json(const ProbeContext& c, unsigned sample) {
     const char* state = c.status == CoopRosterStatus::Captured ? "captured" : c.status == CoopRosterStatus::NotReady ? "not_ready" : "error";
-    const char* action = c.command.action == RosterAction::inspect ? "inspect" : c.command.action == RosterAction::enroll ? "enroll" : c.command.action == RosterAction::select_player ? "select" : c.command.action == RosterAction::copy_character ? "copyCharacter" : c.command.action == RosterAction::upgrade_context ? "upgradeContext" : c.command.action == RosterAction::upgrade_selection ? "upgradeSelection" : c.command.action == RosterAction::upgrade_items ? "upgradeItems" : c.command.action == RosterAction::upgrade_hint ? "upgradeHint" : "rollback";
+    const char* action = c.command.action == RosterAction::inspect ? "inspect" : c.command.action == RosterAction::enroll ? "enroll" : c.command.action == RosterAction::select_player ? "select" : c.command.action == RosterAction::copy_character ? "copyCharacter" : c.command.action == RosterAction::upgrade_context ? "upgradeContext" : c.command.action == RosterAction::upgrade_selection ? "upgradeSelection" : c.command.action == RosterAction::upgrade_items ? "upgradeItems" : c.command.action == RosterAction::upgrade_hint ? "upgradeHint" : c.command.action==RosterAction::equipment?"equipment":c.command.action==RosterAction::input_profile?"inputProfile":"rollback";
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << "{\"schemaVersion\":1,\"sample\":" << sample << ",\"action\":\"" << action
@@ -280,6 +304,44 @@ std::string result_json(const ProbeContext& c, unsigned sample) {
             << ",\"accessoriesCollectionReferencePresent\":" << (actor.accessories_collection_present?"true":"false") << '}';
     }
     out << "]}";
+    const bool equipment_requested=c.command.action==RosterAction::equipment;
+    const bool equipment_captured=equipment_requested&&c.equipment_status==PlayerReadStatus::Captured;
+    const char* equipment_state=!equipment_requested?"not_requested":equipment_captured?"captured":c.equipment_status==PlayerReadStatus::NotReady?"not_ready":"error";
+    out << ",\"equipment\":{\"state\":\"" << equipment_state << "\",\"actors\":[";
+    if(equipment_captured)for(std::size_t i=0;i<c.equipment.actors.size();++i) {
+        const auto& actor=c.equipment.actors[i];if(i)out << ',';
+        out << "{\"slot\":" << actor.slot << ",\"inputId\":" << actor.input_id << ",\"characterType\":" << actor.character_type
+            << ",\"managerReferencePresent\":" << (actor.manager_present?"true":"false")
+            << ",\"collectionReferencePresent\":" << (actor.collection_present?"true":"false") << ",\"items\":[";
+        for(std::size_t j=0;j<actor.items.size();++j) {
+            const auto& item=actor.items[j];if(j)out << ',';
+            out << "{\"referencePresent\":" << (item.reference_present?"true":"false")
+                << ",\"isWeapon\":" << (item.is_weapon?"true":"false")
+                << ",\"fieldsObserved\":" << (item.fields_observed?"true":"false")
+                << ",\"weaponType\":" << item.weapon_type
+                << ",\"ownerReferencePresent\":" << (item.owner_present?"true":"false")
+                << ",\"ownerSlot\":" << item.owner_slot << ",\"runtimeType\":" << quoted_json(item.runtime_type) << '}';
+        }
+        out << "]}";
+    }
+    out << "]}";
+    const bool profile_requested=c.command.action==RosterAction::input_profile;
+    const bool profile_captured=profile_requested&&c.input_profile_status==PlayerReadStatus::Captured;
+    const char* profile_state=!profile_requested?"not_requested":profile_captured?"captured":c.input_profile_status==PlayerReadStatus::NotReady?"not_ready":"error";
+    out << ",\"inputProfile\":{\"state\":\"" << profile_state << '"';
+    if(profile_captured) {
+        out << ",\"managerCount\":" << c.input_profile.manager_count
+            << ",\"horizontalActionId\":" << c.input_profile.horizontal_action_id
+            << ",\"verticalActionId\":" << c.input_profile.vertical_action_id << ",\"definitions\":[";
+        for(std::size_t i=0;i<c.input_profile.definitions.size();++i) {
+            const auto& definition=c.input_profile.definitions[i];if(i)out << ',';
+            out << "{\"sourceId\":" << definition.source_id << ",\"axisIds\":[";
+            for(std::size_t j=0;j<definition.axis_ids.size();++j){if(j)out << ',';out << definition.axis_ids[j];}
+            out << "]}";
+        }
+        out << ']';
+    }
+    out << '}';
     out << ",\"playerObservation\":" << player_observation_json(c.player_status, c.scene, c.identity, sample)
         << ",\"errors\":{\"action\":" << quoted_json(c.action_error)
         << ",\"roster\":" << quoted_json(c.roster_error)
@@ -312,6 +374,7 @@ void run_coop_roster_probe(HMODULE bridge, HMODULE game, Il2CppApi api,
             !c.roster.initialize(game, api, domain, c.window.thread, 0, c.error) ||
             !c.player.initialize(game, api, domain, c.window.thread, 0, c.error))
             throw std::runtime_error("Roster/player metadata contract: " + c.error);
+        c.module=game;c.api=api;c.domain=domain;
         attachment.detach();
         log("WSM_ROSTER_READY: metadata worker detached; eight bounded requests; mutation requires explicit operator-established outside-run phase");
         const auto deadline = GetTickCount64() + 15ull * 60 * 1000;
@@ -323,11 +386,11 @@ void run_coop_roster_probe(HMODULE bridge, HMODULE game, Il2CppApi api,
             if (!IsWindow(c.window.hwnd) || GetTickCount64() >= deadline) break;
             if (!parse_command(read_command(request), GetCurrentProcessId(), c.command))
                 throw std::runtime_error("Invalid roster command or mismatched own-process ID");
-            c.snapshot = {}; c.configuration = {}; c.configuration_captured = false; c.scene = {}; c.upgrade = {}; c.identity = {}; c.error.clear();
+            c.snapshot = {}; c.configuration = {}; c.configuration_captured = false; c.scene = {}; c.upgrade = {}; c.equipment = {}; c.input_profile = {}; c.identity = {}; c.error.clear();
             c.action_error.clear(); c.roster_error.clear(); c.configuration_error.clear(); c.player_error.clear(); c.upgrade_error.clear();
-            c.status = CoopRosterStatus::Error; c.player_status = PlayerReadStatus::Error; c.upgrade_status = PlayerReadStatus::Error; c.action_succeeded = false;
+            c.status = CoopRosterStatus::Error; c.player_status = PlayerReadStatus::Error; c.upgrade_status = PlayerReadStatus::Error; c.equipment_status = PlayerReadStatus::Error; c.input_profile_status = PlayerReadStatus::Error; c.action_succeeded = false;
             const auto status = run_window_hook(bridge, c.window.hwnd, c.window.thread, execute_command, &c, 2000);
-            if (status != HookResult::completed) { c.action_succeeded = false; c.status = CoopRosterStatus::Error; c.player_status = PlayerReadStatus::Error; c.upgrade_status=PlayerReadStatus::Error; c.error = c.action_error = "Owned Unity roster callback did not complete"; }
+            if (status != HookResult::completed) { c.action_succeeded = false; c.status = CoopRosterStatus::Error; c.player_status = PlayerReadStatus::Error; c.upgrade_status=PlayerReadStatus::Error; c.equipment_status=PlayerReadStatus::Error; c.input_profile_status=PlayerReadStatus::Error; c.error = c.action_error = "Owned Unity roster callback did not complete"; }
             publish_result(directory / ("state-" + number.str() + ".json"), result_json(c, sample));
             log("WSM_ROSTER_RESULT=" + std::to_string(sample) + " success=" + std::to_string(c.action_succeeded) +
                 " pending=" + std::to_string(c.roster.has_pending_enrollment()));

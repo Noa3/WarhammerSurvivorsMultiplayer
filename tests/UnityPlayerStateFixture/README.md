@@ -110,7 +110,8 @@ These are managed-reference observations, not Unity native-object liveness.
 to an actual fixture `List<Int32>` field on the same canonical equipment manager.
 It requires metadata refusal rather than accepting another `List<T>`. No runtime
 metadata is patched, and this field-redirection seam is absent from the
-production bridge. Equipment elements are never read by the diagnostic.
+production bridge. Equipment elements are never read by that structural query;
+the separate inventory query below explicitly observes them.
 
 The choice-container cases use the original fixture's `Wilson.UI.UIGroup<T>`
 with a protected `List<T> items` and the page's typed `_ChoiceContainerGroup`
@@ -169,6 +170,35 @@ refusal, late-error atomicity and overlarge child lists. Successful older querie
 must reset all hint flags and the slot to unrequested defaults; errors preserve
 the full deliberately populated snapshot. Hint presence, Unity liveness and
 complete child comparison are separate facts, not a cause or throw-time proof.
+
+The separate `read_equipment` entry point observes bounded canonical equipment
+lists without requiring an upgrade page. Original `Equipment.Owner` / `Type`,
+`Weapon` and `FixtureWeapon` contracts distinguish two actual actor identities,
+null manager/list/item/owner, empty lists, non-weapons and an owner outside the
+captured actors. Cases include exactly 32/over 32 items, duplicate actors/input
+IDs, a stopped run, wrong thread, missing stage/manager, count mutation from a
+getter and a late owner exception. Every refusal preserves a populated caller
+snapshot. Presence/class/owner observations do not prove Unity liveness, weapon
+execution or damage attribution.
+
+`FixtureWeapon` is declared in `Assets/FixtureWeapon.cs`, outside the canonical
+base assembly. `equipment_cross_image_contract` checks that its assembly really
+differs from `Weapon`'s assembly. Capture must accept that subtype through exact
+canonical base assignability, without relaxing the declared getter/type bindings.
+The count-change case requires both an invoked owner callback and the specific
+`Equipment count changed` refusal with unchanged caller output. A separate case
+throws an unrelated owner exception and requires that this count-change oracle
+reject it; a generic Error is not sufficient. Cleanup removes only entries that
+were actually appended, so an earlier refusal cannot abort the remaining cases.
+
+`read_rewired_input_profile` resolves its own optional metadata only when called.
+The original Rewired fixture includes an active derived input manager, UserData,
+controller definitions and a nested MappingHelper. Cases distinguish valid empty
+definitions, one/zero/two-axis definitions, actual movement-name lookup results,
+absent actions, readiness/thread/manager refusal, null definitions/arrays, duplicate
+or negative identifiers, 16/17 definitions, 32/33 axes and a late getter exception.
+The snapshot is committed only after complete capture. These tests create no
+custom controller, map or input pulse and cannot prove player input isolation.
 
 The reader trusts the inspected runtime's provenance. It resolves named contracts
 and checks important class/image identities, but is not an admission boundary for

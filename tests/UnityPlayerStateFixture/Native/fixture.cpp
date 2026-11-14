@@ -1,4 +1,5 @@
 #include "wsm/player_state_reader.h"
+#include "wsm/rewired_input_profile.h"
 #include <windows.h>
 #include <cstdio>
 #include <string>
@@ -8,6 +9,79 @@ namespace { std::string g_reason;
 void note(const char* tag,const std::string& detail,int status){ g_reason=std::string(tag)+" status="+std::to_string(status)+" detail="+(detail.empty()?"-":detail); }
 std::string player(const wsm::PlayerStateSnapshot& p){ return "("+std::to_string(p.x)+","+std::to_string(p.y)+",hp="+std::to_string(p.hp)+",xp="+std::to_string(p.xp)+",level="+std::to_string(p.level)+",input="+std::to_string(p.input_id)+",kind="+std::to_string(p.character_type)+",dead="+(p.dead?"1":"0")+")"; } }
 extern "C" __declspec(dllexport) const char* __cdecl fixture_reason() { return g_reason.c_str(); }
+extern "C" __declspec(dllexport) int __cdecl fixture_input_profile(int managed,unsigned os,int mode) {
+    g_reason.clear();auto module=GetModuleHandleW(L"GameAssembly.dll");wsm::Il2CppApi api;std::string error;
+    if(!module||!wsm::Il2CppApi::resolve(module,api,error)||!api.resolve_probe(module,error))return 50;
+    wsm::RewiredInputProfileSnapshot snapshot;snapshot.manager_count=77;snapshot.horizontal_action_id=78;snapshot.vertical_action_id=79;
+    snapshot.definitions={{-3,{99,101}}};
+    const auto unchanged=[&]{return snapshot.manager_count==77&&snapshot.horizontal_action_id==78&&snapshot.vertical_action_id==79&&
+        snapshot.definitions.size()==1&&snapshot.definitions[0].source_id==-3&&snapshot.definitions[0].axis_ids==std::vector<std::int32_t>{99,101};};
+    auto status=wsm::read_rewired_input_profile(module,api,api.domain_get(),os,managed,snapshot,error);
+    if(mode==8||mode==9) {
+        const char* expected=mode==8?"Custom controller count exceeds 16":"Axis identifier count exceeds 32";
+        if(status==wsm::PlayerReadStatus::Error&&error==expected&&unchanged())return 0;
+        note("input_profile_bound_refusal",error,57);return 57;
+    }
+    if(mode==1)return status==wsm::PlayerReadStatus::NotReady&&error.empty()&&unchanged()?0:51;
+    if(mode==2)return status==wsm::PlayerReadStatus::Error&&!error.empty()&&unchanged()?0:52;
+    if(status!=wsm::PlayerReadStatus::Captured||!error.empty()){note("input_profile_capture",error,53);return 53;}
+    const std::size_t count=mode==3?0:mode==4?16:mode==5||mode==6?1:2;
+    if(snapshot.manager_count!=1||snapshot.horizontal_action_id!=(mode==7?-1:101)||snapshot.vertical_action_id!=103||snapshot.definitions.size()!=count)return 54;
+    for(std::size_t i=0;i<count;++i) {
+        auto& definition=snapshot.definitions[i];
+        if(definition.source_id!=(mode==4?static_cast<int>(7+i):i==0?7:11))return 55;
+        std::vector<std::int32_t> axes;
+        if(mode==5){for(int n=0;n<32;++n)axes.push_back(n);}
+        else if(mode==6)axes={9};
+        else if(mode==4||i==0)axes={2,9};
+        if(definition.axis_ids!=axes)return 56;
+    }
+    return 0;
+}
+extern "C" __declspec(dllexport) int __cdecl fixture_equipment(int managed, unsigned os, int mode) {
+    g_reason.clear();auto module=GetModuleHandleW(L"GameAssembly.dll");
+    wsm::Il2CppApi api;std::string error;wsm::PlayerStateReader reader;
+    if(!module||!wsm::Il2CppApi::resolve(module,api,error)||!api.resolve_probe(module,error)||
+       !reader.initialize(module,api,api.domain_get(),os,managed,error)){note("equipment_init",error,40);return 40;}
+    wsm::EquipmentSnapshot snapshot;wsm::EquipmentActorSnapshot seed;seed.slot=-9;seed.input_id=73;
+    seed.character_type=-8;seed.manager_present=true;seed.collection_present=true;
+    seed.items={{true,true,true,true,77,-2,"Sentinel.Weapon"}};snapshot.actors.push_back(seed);
+    const auto unchanged=[&]{return snapshot.actors.size()==1&&snapshot.actors[0].slot==-9&&
+        snapshot.actors[0].input_id==73&&snapshot.actors[0].character_type==-8&&
+        snapshot.actors[0].manager_present&&snapshot.actors[0].collection_present&&
+        snapshot.actors[0].items.size()==1&&snapshot.actors[0].items[0].reference_present&&
+        snapshot.actors[0].items[0].is_weapon&&snapshot.actors[0].items[0].fields_observed&&
+        snapshot.actors[0].items[0].owner_present&&snapshot.actors[0].items[0].weapon_type==77&&
+        snapshot.actors[0].items[0].owner_slot==-2&&snapshot.actors[0].items[0].runtime_type=="Sentinel.Weapon";};
+    auto status=reader.read_equipment(snapshot,error);
+    if(mode==10) {
+        if(status==wsm::PlayerReadStatus::Error&&error=="Equipment count changed"&&unchanged())return 0;
+        note("equipment_count_change_refusal",error,59);return 59;
+    }
+    if(mode==1)return status==wsm::PlayerReadStatus::NotReady&&error.empty()&&unchanged()?0:41;
+    if(mode==2)return status==wsm::PlayerReadStatus::Error&&!error.empty()&&unchanged()?0:42;
+    if(status!=wsm::PlayerReadStatus::Captured||!error.empty()){note("equipment_capture",error,43);return 43;}
+    if(snapshot.actors.size()!=2)return 44;
+    const auto& a=snapshot.actors[0];const auto& b=snapshot.actors[1];
+    const std::size_t size=mode==4||mode==5?0:mode==9?32:2;
+    if(a.slot!=0||a.input_id!=41||a.character_type!=3||!a.manager_present||a.collection_present!=(mode!=4)||a.items.size()!=size||
+       b.slot!=1||b.input_id!=52||b.character_type!=4||b.manager_present!=(mode!=3)||b.collection_present!=(mode!=3)||b.items.size()!=(mode==3?0u:1u))return 45;
+    for(std::size_t i=0;i<a.items.size();++i) {
+        const auto& item=a.items[i];
+        if(i==0) {
+            const auto name=mode==8?"VampireSurvivors.Objects.Equipment":"VampireSurvivors.Objects.Weapons.FixtureWeapon";
+            if(!item.reference_present||item.is_weapon!=(mode!=8)||!item.fields_observed||item.owner_present!=(mode!=6)||
+               item.owner_slot!=(mode==6?-1:mode==7?-2:0)||item.weapon_type!=7001||item.runtime_type!=name)return 46;
+        } else if(item.reference_present||item.fields_observed||item.owner_present||item.is_weapon||item.owner_slot!=-1||
+                  item.weapon_type!=0||!item.runtime_type.empty())return 46;
+    }
+    if(mode!=3) {
+        const auto& bw=b.items[0];
+        if(!bw.reference_present||!bw.is_weapon||!bw.fields_observed||!bw.owner_present||bw.owner_slot!=1||bw.weapon_type!=7002||
+           bw.runtime_type!="VampireSurvivors.Objects.Weapons.FixtureWeapon")return 46;
+    }
+    return 0;
+}
 extern "C" __declspec(dllexport) int __cdecl fixture_test(int managed, unsigned os, int mode) {
     g_reason.clear();
     auto module = GetModuleHandleW(L"GameAssembly.dll");
