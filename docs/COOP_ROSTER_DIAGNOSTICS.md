@@ -53,6 +53,7 @@ stop the diagnostic loop.
 | Command | Effect |
 | --- | --- |
 | `inspect` | Capture configured/enrolled IDs, optional menu configuration and current player observation. |
+| `upgradeContext:<pid>` | Explicit read-only upgrade-context query in an existing run; never enters roster mutation dispatch. |
 | `enroll:<pid>:<id>` | Add one existing configured player to the exact one-player baseline. |
 | `select:<pid>:<id>` | Select an enrolled menu player, not a hero; no exclusive input control or vibration. |
 | `copy:<pid>:<id>` | Copy the stock menu's currently bought character into that player's existing selection entry. |
@@ -64,9 +65,9 @@ one-player baseline, not a general party editor.
 
 Responses are `state-000001.json` etc. The envelope reports `action`,
 `actionSucceeded`, roster `state`, `pendingEnrollment`, `configuredIds`,
-`enrolledIds`, `characterConfiguration`, `playerObservation` and separate
+`enrolledIds`, `characterConfiguration`, `playerObservation`, `upgradeContext` and separate
 `errors.action`, `errors.roster`, `errors.characterConfiguration` and
-`errors.playerObservation`. Optional diagnostic failure is not an empty successful
+`errors.playerObservation` / `errors.upgradeContext`. Optional diagnostic failure is not an empty successful
 selection. Inspect each subsystem's result; a successful action does not certify
 all observations. Existing outputs are never replaced.
 
@@ -74,6 +75,35 @@ all observations. Existing outputs are never replaced.
 `GetCharacterSelections()` method, not a direct dictionary-field snapshot.
 `coopConfigReferencePresent` establishes only a managed reference, not a valid
 native asset or correct behavior. Getter names do not establish purity.
+
+### Explicit upgrade-context query
+
+Only `upgradeContext:<pid>` invokes the extra reader. Ordinary commands report
+`upgradeContext.state` as `not_requested`; optional Wilson/equipment metadata
+is not required by normal reader initialization or observation. The new query
+still counts toward the same eight-request budget and uses the verified main
+thread. It does not require the menu-only mutation precondition, invoke a new
+game getter, open a page or write any field.
+
+The reader requires an active run, valid Stage and bounded MainPlayers, plus
+exactly one scene `Wilson.UI.WSLevelUpPage`. Missing scene resources report
+`not_ready`; ambiguous instances or incompatible metadata report `error`.
+Both statuses suppress old actor/context values. A captured result reports:
+
+- `levelUpPageCount` and the page's game-session/factory reference presence;
+- active-character reference presence and `activeCharacterSlot`: an exact
+  MainPlayers slot, `-1` for no active reference, or `-2` for a non-null reference
+  outside that list;
+- each actor's slot, input ID, character type and weapons-manager,
+  accessories-manager and accessories-collection reference presence.
+
+Session/collection properties are inspected through verified backing fields,
+not by invoking their getters. **Presence means a rooted managed reference,
+not Unity native-object liveness**, valid contents or a cause of the upgrade
+exception. No collection element is read. The normal previously approved scene
+getters are still involved; this is not a proof of their purity or an atomic
+engine snapshot. `actionSucceeded` for this command means context capture, not
+that every other observation succeeded or the upgrade became playable.
 
 ## Mutation boundaries
 

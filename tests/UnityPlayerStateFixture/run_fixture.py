@@ -4,7 +4,11 @@ from collections import Counter
 EXPECTED_CASES = {"no_manager", "null_stage", "empty_players", "two_players", "populated_stopped",
                   "wrong_native_thread", "wrong_managed_thread", "null_context", "substituted_context",
                   "worker_thread", "over_cap", "non_finite", "late_non_finite", "null_input", "recovered",
-                  "stage_root_failure", "players_root_failure"}
+                  "stage_root_failure", "players_root_failure",
+                  "upgrade_missing_page", "upgrade_second_actor", "upgrade_null_session", "upgrade_null_active",
+                  "upgrade_foreign_active", "upgrade_null_collection", "upgrade_null_factory", "upgrade_duplicate_pages",
+                  "upgrade_wrong_thread", "upgrade_stopped", "upgrade_late_error", "upgrade_stage_root_failure",
+                  "upgrade_recovered", "upgrade_no_manager", "upgrade_duplicate_actor", "upgrade_wrong_collection_type"}
 root=os.path.abspath(os.path.join(os.path.dirname(__file__),"..",".."))
 local=os.path.join(root,".local")
 player=os.environ.get("WSM_PLAYER_STATE_PLAYER","player-state-v1-player4")

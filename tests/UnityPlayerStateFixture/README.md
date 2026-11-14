@@ -15,7 +15,8 @@ assembly: global `ArcadeSprite.position`), `Assets/Rewired` (`Rewired_Core`
 assembly: `Rewired.Player.id`), `Assets/Runtime` (`VampireSurvivors.Runtime`
 assembly: `GameManager.MainPlayers`/`Stage`/`IsGameRunning`, `CharacterController`, enums),
 `Assets/PlayerFixture.cs` (driver, owns the expected main-thread identities),
-`Native/fixture.cpp` (exports `fixture_test`, drives the production reader).
+`Native/fixture.cpp` (exports `fixture_test` and `fixture_upgrade`, drives the
+production scene reader and explicit upgrade-context diagnostic).
 
 Build and run from the repository root (Git Bash), Unity 6000.0.74f1 Windows
 IL2CPP module + MSVC x64:
@@ -39,7 +40,9 @@ python tests/UnityPlayerStateFixture/run_fixture.py
 `run_fixture.py` runs the player headless with `-batchmode -nographics` (window
 never activated, no input touched) and needs both exit code 0 and the driver's
 `PLAYER_TEST RESULT failures=0` line plus exactly one passing occurrence of each
-of the 17 named cases, so an early exit or changed case membership cannot look green. It defaults to
+of every named case in `EXPECTED_CASES`, including the 17 baseline scene cases
+and the upgrade-context cases below, so an early exit or changed case membership
+cannot look green. It defaults to
 `.local/player-state-v1-player4` (the build matching the current sources);
 override with `WSM_PLAYER_STATE_PLAYER`. The editor run is headless and writes
 only into `.local/` (`player-state-v1-*`); check `PLAYER_FIXTURE_BUILD=Succeeded`
@@ -91,6 +94,21 @@ reader, no reimplementation):
   classification, not an actual out-of-memory condition. This test seam is not
   compiled into the production bridge.
 - `recovered` → `Captured` again after the mutation is undone.
+
+The explicit `read_upgrade_context` entry point additionally checks the second
+actor's rooted identity, foreign/null active character, null session/factory,
+different actor manager references, null accessories collection, missing or
+duplicate page, duplicate actor identity, stopped run, wrong native thread,
+late input failure, Stage root failure, missing manager and recovery. Failed or
+unavailable captures must preserve every field of a seeded two-actor context.
+These are managed-reference observations, not Unity native-object liveness.
+
+`upgrade_wrong_collection_type` uses the test-only
+`test_use_wrong_equipment_collection` seam to redirect collection inspection
+to an actual fixture `List<Int32>` field on the same canonical equipment manager.
+It requires metadata refusal rather than accepting another `List<T>`. No runtime
+metadata is patched, and this field-redirection seam is absent from the
+production bridge. Collection elements are never read by the diagnostic.
 
 The reader trusts the inspected runtime's provenance. It resolves named contracts
 and checks important class/image identities, but is not an admission boundary for

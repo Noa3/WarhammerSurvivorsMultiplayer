@@ -35,6 +35,7 @@ struct PlayerStateReader::Impl {
     void (*handle_free)(void*)=nullptr;
 #ifdef WSM_PLAYER_STATE_TESTING
     mutable Il2CppClass* fail_root_class=nullptr;
+    bool wrong_equipment_collection=false;
 #endif
     struct Root {
         const Impl& p; void* h;
@@ -97,11 +98,14 @@ PlayerStateReader::~PlayerStateReader()=default;
 void PlayerStateReader::test_fail_next_scene_root(bool players) {
     if(impl_)impl_->fail_root_class=players?impl_->class_from_type(impl_->a.method_get_return_type(impl_->players)):impl_->stage;
 }
+void PlayerStateReader::test_use_wrong_equipment_collection() {
+    if(impl_)impl_->wrong_equipment_collection=true;
+}
 #endif
 bool PlayerStateReader::initialize(HMODULE module,Il2CppApi api,Il2CppDomain* domain,DWORD native_thread,std::int32_t managed_thread,std::string& error){
     impl_.reset(); error.clear();
     if(!module||!domain||!native_thread||!api.thread_current||!api.thread_current()||!api.domain_get_assemblies||!api.assembly_get_image||!api.image_get_name||!api.image_get_class_count||!api.image_get_class||!api.class_get_name||!api.class_get_namespace||!api.class_get_methods||!api.method_get_name||!api.method_get_param_count||!api.method_get_param||!api.method_get_return_type||!api.method_get_flags||!api.type_get_name||!api.free||!api.class_get_type||!api.type_get_object||!api.array_length||!api.runtime_invoke||!api.object_get_class||!api.object_unbox){error="Incomplete runtime API or thread not attached";return false;}
-    auto p=std::make_unique<Impl>(); p->a=api;p->os=native_thread;p->managed=managed_thread;
+    auto p=std::make_unique<Impl>(); p->a=api;p->os=native_thread;p->managed=managed_thread;p->domain=domain;
 #define LOAD(member,name) p->member=reinterpret_cast<decltype(p->member)>(GetProcAddress(module,name)); if(!p->member){error=std::string("Missing export ")+name;return false;}
     LOAD(parent,"il2cpp_class_get_parent"); LOAD(enum_base,"il2cpp_class_enum_basetype");
     LOAD(field_by_name,"il2cpp_class_get_field_from_name");LOAD(field_flags,"il2cpp_field_get_flags");LOAD(field_type,"il2cpp_field_get_type");LOAD(field_parent,"il2cpp_field_get_parent");LOAD(field_value,"il2cpp_field_get_value");
@@ -181,6 +185,147 @@ PlayerReadStatus PlayerStateReader::read(SceneStateSnapshot& output,std::string&
         p.field_value(pos.get(),p.fx,&s.x);p.field_value(pos.get(),p.fy,&s.y);
         if(!std::isfinite(s.x)||!std::isfinite(s.y)||!std::isfinite(s.hp)||!std::isfinite(s.xp)){error="Non-finite player value";return PlayerReadStatus::Error;}
         result.players.push_back(s);
+    }
+    output=std::move(result);return PlayerReadStatus::Captured;
+}
+
+PlayerReadStatus PlayerStateReader::read_upgrade_context(UpgradeContextSnapshot& output,std::string& error) const {
+    error.clear();
+    if(!impl_){error="Reader not initialized";return PlayerReadStatus::Error;}
+    const auto& p=*impl_;
+    MainThreadIdentity identity;
+    if(!p.guard.verify(p.os,p.managed,identity,error))return PlayerReadStatus::Error;
+    // Resolve nothing upgrade-specific until the caller explicitly requests this diagnostic.
+    const auto fail=[&](const char* message){error=message;return PlayerReadStatus::Error;};
+    const auto find_one=[&](Il2CppClass* cls,std::unique_ptr<Impl::Root>& found,std::int32_t& count)->PlayerReadStatus {
+        if(!cls)return fail("Missing or ambiguous diagnostic class");
+        Impl::Root type(p,p.a.type_get_object(p.a.class_get_type(cls)));
+        if(!type.get())return fail("Unable to root diagnostic type");
+        void* args[]={type.get()};auto raw_array=p.invoke(p.find,nullptr,args,error);
+        if(!error.empty())return PlayerReadStatus::Error;
+        Impl::Root array(p,raw_array);
+        if(!array.get())return fail("Unable to root diagnostic lookup array");
+        auto array_class=p.a.object_get_class(array.get());auto element=p.element_class(array_class);
+        if(!element || (!p.assignable(cls,element)&&!p.assignable(element,cls)))return fail("Unexpected diagnostic lookup array type");
+        auto length=p.a.array_length(reinterpret_cast<Il2CppArray*>(array.get()));
+        if(length==0){count=0;return PlayerReadStatus::NotReady;}
+        if(length!=1)return fail("Ambiguous diagnostic scene instances");
+        count=1;std::int32_t zero=0;void* index[]={&zero};auto raw=p.invoke(p.array_item,array.get(),index,error);
+        if(!error.empty())return PlayerReadStatus::Error;
+        found=std::make_unique<Impl::Root>(p,raw);
+        if(!p.is_a(found->get(),cls))return fail("Invalid diagnostic scene instance");
+        return PlayerReadStatus::Captured;
+    };
+    std::unique_ptr<Impl::Root> manager;std::int32_t manager_count=0;
+    auto status=find_one(p.manager,manager,manager_count);if(status!=PlayerReadStatus::Captured)return status;
+    std::uint8_t running=0;
+    if(!p.value(p.invoke(p.running,manager->get(),nullptr,error),p.boolclass,running,error))return PlayerReadStatus::Error;
+    if(running>1)return fail("Invalid diagnostic run-state Boolean");
+    if(!running)return PlayerReadStatus::NotReady;
+    auto raw_stage=p.invoke(p.stage_get,manager->get(),nullptr,error);
+    if(!error.empty())return PlayerReadStatus::Error;
+    if(!raw_stage)return PlayerReadStatus::NotReady;
+    Impl::Root stage(p,raw_stage);
+    if(!p.is_a(stage.get(),p.stage))return fail("Unable to root valid diagnostic Stage");
+
+    const auto game_class=[&](const char* ns,const char* name){return p.klass(p.domain,"VampireSurvivors.Runtime.dll",ns,name);};
+    auto page_class=game_class("Wilson.UI","WSLevelUpPage");
+    auto weapons_class=game_class("VampireSurvivors.Objects","CharacterWeaponsManager");
+    auto accessories_class=game_class("VampireSurvivors.Objects","CharacterAccessoriesManager");
+    auto equipment_class=game_class("VampireSurvivors.Objects","EquipmentManager");
+    auto equipment_element=game_class("VampireSurvivors.Objects","Equipment");
+    auto session_class=game_class("VampireSurvivors.Framework","GameSessionData");
+    auto factory_class=game_class("VampireSurvivors.Framework","LevelUpFactory");
+    if(!page_class||!weapons_class||!accessories_class||!equipment_class||!equipment_element||!session_class||!factory_class)
+        return fail("Missing or ambiguous upgrade-context metadata");
+    if(p.parent(accessories_class)!=equipment_class)return fail("Unexpected accessories manager inheritance");
+    const auto reference_field=[&](Il2CppClass* owner,const char* name,Il2CppClass* expected)->FieldInfo* {
+        auto field=p.field_by_name(owner,name);
+        if(!field || p.field_parent(field)!=owner || (p.field_flags(field)&(16|64)) ||
+           !expected || p.class_from_type(p.field_type(field))!=expected)return nullptr;
+        return field;
+    };
+    auto weapons_field=reference_field(p.character,"_weaponsManager",weapons_class);
+    auto accessories_field=reference_field(p.character,"_accessoriesManager",accessories_class);
+    auto session_field=reference_field(page_class,"_gameSession",session_class);
+    auto factory_field=reference_field(page_class,"_levelUpFactory",factory_class);
+    auto active_field=reference_field(session_class,"<ActiveCharacter>k__BackingField",p.character);
+    const char* collection_name="<ActiveEquipment>k__BackingField";
+#ifdef WSM_PLAYER_STATE_TESTING
+    // The original fixture provides a real List<Int32> field. Redirect only the
+    // test build to model incompatible field metadata without patching a runtime.
+    if(p.wrong_equipment_collection)collection_name="<WrongEquipment>k__BackingField";
+#endif
+    auto collection_field=p.field_by_name(equipment_class,collection_name);
+    auto collection_class=collection_field?p.class_from_type(p.field_type(collection_field)):nullptr;
+    constexpr const char* equipment_type="VampireSurvivors.Objects.Equipment";
+    constexpr const char* equipment_list="System.Collections.Generic.List<VampireSurvivors.Objects.Equipment>";
+    auto collection_item=p.method(collection_class,"get_Item",equipment_type,"System.Int32");
+    // Inspect metadata only: do not invoke get_Item or read a collection element.
+    // Both the closed type and its canonical element image/identity must match.
+    if(!collection_field || !p.type(p.field_type(collection_field),equipment_list) ||
+       !p.result_image(collection_item,equipment_type,"VampireSurvivors.Runtime.dll","VampireSurvivors.Objects","Equipment") ||
+       p.class_from_type(p.a.method_get_return_type(collection_item))!=equipment_element)
+        return fail("ActiveEquipment must be List of canonical Equipment");
+    if(!collection_class || !p.image_for_class(collection_class,"mscorlib.dll") ||
+       !eq(p.a.class_get_namespace(collection_class),"System.Collections.Generic") ||
+       !eq(p.a.class_get_name(collection_class),"List`1") ||
+       reference_field(equipment_class,collection_name,collection_class)!=collection_field ||
+       !weapons_field||!accessories_field||!session_field||!factory_field||!active_field)
+        return fail("Invalid upgrade-context reference field metadata");
+    const auto read_ref=[&](Il2CppObject* owner,FieldInfo* field,Il2CppClass* expected,std::unique_ptr<Impl::Root>& root)->bool {
+        if(!p.is_a(owner,p.field_parent(field))){error="Unexpected diagnostic field owner";return false;}
+        Il2CppObject* raw=nullptr;p.field_value(owner,field,&raw);
+        root=std::make_unique<Impl::Root>(p,raw);
+        if(raw && (!root->get() || !p.is_a(root->get(),expected))){error="Unable to root expected diagnostic reference";return false;}
+        return true;
+    };
+    UpgradeContextSnapshot result;std::unique_ptr<Impl::Root> page;
+    status=find_one(page_class,page,result.level_up_page_count);if(status!=PlayerReadStatus::Captured)return status;
+    auto raw_list=p.invoke(p.players,manager->get(),nullptr,error);
+    if(!error.empty())return PlayerReadStatus::Error;
+    if(!raw_list)return PlayerReadStatus::NotReady;
+    Impl::Root list(p,raw_list);
+    if(!list.get())return fail("Unable to root diagnostic MainPlayers");
+    auto list_class=p.a.object_get_class(list.get());
+    if(!p.image_for_class(list_class,"mscorlib.dll")||!p.type(p.a.class_get_type(list_class),kList))return fail("Unexpected diagnostic MainPlayers type");
+    auto count_get=p.method(list_class,"get_Count","System.Int32");auto item_get=p.method(list_class,"get_Item",kCharacter,"System.Int32");
+    if(!count_get||!item_get)return fail("Missing diagnostic MainPlayers methods");
+    std::int32_t count=0;if(!p.integer32(p.invoke(count_get,list.get(),nullptr,error),count,error))return PlayerReadStatus::Error;
+    if(count==0)return PlayerReadStatus::NotReady;
+    if(count<0||count>kMaximumPlayers)return fail("Diagnostic MainPlayers count outside supported bound");
+    std::vector<std::unique_ptr<Impl::Root>> actors;
+    for(std::int32_t i=0;i<count;++i) {
+        void* index[]={&i};auto raw=p.invoke(item_get,list.get(),index,error);
+        if(!error.empty())return PlayerReadStatus::Error;
+        auto actor=std::make_unique<Impl::Root>(p,raw);
+        if(!p.is_a(actor->get(),p.character))return fail("Invalid diagnostic actor");
+        for(const auto& prior:actors)if(prior->get()==actor->get())return fail("Ambiguous duplicate diagnostic actor identity");
+        UpgradeActorContext row;row.slot=i;
+        if(!p.value(p.invoke(p.kind,actor->get(),nullptr,error),p.character_enum,row.character_type,error))return PlayerReadStatus::Error;
+        Impl::Root input(p,p.invoke(p.player_input,actor->get(),nullptr,error));
+        if(!error.empty())return PlayerReadStatus::Error;
+        if(!p.is_a(input.get(),p.input))return fail("Invalid diagnostic PlayerInput");
+        if(!p.integer32(p.invoke(p.input_id,input.get(),nullptr,error),row.input_id,error))return PlayerReadStatus::Error;
+        std::unique_ptr<Impl::Root> weapons,accessories,collection;
+        if(!read_ref(actor->get(),weapons_field,weapons_class,weapons)||!read_ref(actor->get(),accessories_field,accessories_class,accessories))return PlayerReadStatus::Error;
+        row.weapons_manager_present=weapons->get()!=nullptr;row.accessories_manager_present=accessories->get()!=nullptr;
+        if(row.accessories_manager_present) {
+            if(!read_ref(accessories->get(),collection_field,collection_class,collection))return PlayerReadStatus::Error;
+            row.accessories_collection_present=collection->get()!=nullptr;
+        }
+        actors.push_back(std::move(actor));result.actors.push_back(row);
+    }
+    std::unique_ptr<Impl::Root> session,factory,active;
+    if(!read_ref(page->get(),session_field,session_class,session)||!read_ref(page->get(),factory_field,factory_class,factory))return PlayerReadStatus::Error;
+    result.page_game_session_present=session->get()!=nullptr;result.level_up_factory_present=factory->get()!=nullptr;
+    if(result.page_game_session_present) {
+        if(!read_ref(session->get(),active_field,p.character,active))return PlayerReadStatus::Error;
+        result.active_character_present=active->get()!=nullptr;
+        if(result.active_character_present) {
+            result.active_character_slot=-2;
+            for(std::int32_t i=0;i<count;++i)if(actors[i]->get()==active->get())result.active_character_slot=i;
+        }
     }
     output=std::move(result);return PlayerReadStatus::Captured;
 }

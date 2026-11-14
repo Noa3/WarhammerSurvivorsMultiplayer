@@ -6,6 +6,9 @@ namespace VampireSurvivors.Objects { [Preserve] public class Stage { [Preserve] 
 namespace VampireSurvivors.Objects.Characters {
  [Preserve] public class CharacterController : ArcadeSprite {
   public float hp,xp; public bool dead; public int level; public VampireSurvivors.Data.CharacterType kind; public Rewired.Player input;
+  [Preserve] private VampireSurvivors.Objects.CharacterWeaponsManager _weaponsManager;
+  [Preserve] private VampireSurvivors.Objects.CharacterAccessoriesManager _accessoriesManager;
+  public void ConfigureManagers(VampireSurvivors.Objects.CharacterWeaponsManager weapons, VampireSurvivors.Objects.CharacterAccessoriesManager accessories) { _weaponsManager=weapons; _accessoriesManager=accessories; }
   [Preserve] public float CurrentHp=>hp; [Preserve] public float Xp=>xp; [Preserve] public bool IsDead=>dead; [Preserve] public int Level=>level;
   [Preserve] public VampireSurvivors.Data.CharacterType CharacterType=>kind; [Preserve] public Rewired.Player PlayerInput=>input;
  }
