@@ -1,0 +1,13 @@
+* text=auto
+*.cs text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+# Preserve packaged binaries, runtime metadata and checksums byte-for-byte.
+distribution/win-x64/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+# Third-party license text is retained verbatim, including upstream whitespace.
+distribution/win-x64/licenses/** -whitespace

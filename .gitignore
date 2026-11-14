@@ -1,0 +1,55 @@
+# Generated build output
+**/bin/
+**/obj/
+artifacts/
+build/
+.vs/
+.vscode/
+TestResults/
+*.user
+*.suo
+*.log
+*.dmp
+
+# Local-only analysis, assistant state, captures, and proprietary game data
+.local/
+execplan/
+.codegraph/
+.hermes/
+.claude/
+.codex/
+.serena/
+AGENTS.md
+CLAUDE.md
+IDEA.md
+idea.md
+docs/COOP_DESIGN.md
+AI_*.md
+**/__pycache__/
+*.pyc
+*.pdb
+
+# Installed game files and third-party loader output (not redistributable project data)
+WarhammerSurvivors.exe
+UnityPlayer.dll
+GameAssembly.dll
+global-metadata.dat
+WarhammerSurvivors_Data/
+MelonLoader/
+BepInEx/
+Il2CppAssemblies/
+*.acf
+
+# Credentials, machine-local config, recordings and saves
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+*.secret
+settings.local.json
+*.sav
+*.save
+
+# Project-owned runtime assets and distribution files are intentionally NOT ignored.
+# Store private captures, downloaded files and archives under .local/ or artifacts/.

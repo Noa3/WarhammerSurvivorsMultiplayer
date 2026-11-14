@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>Wsm.Launcher</AssemblyName></PropertyGroup>
+  <ItemGroup><InternalsVisibleTo Include="Wsm.Launcher.Tests" /></ItemGroup>
+</Project>
