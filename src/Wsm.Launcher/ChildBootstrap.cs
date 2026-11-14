@@ -16,7 +16,7 @@ public sealed class ChildBootstrap : IDisposable
     private ChildBootstrap(Process process) => Process = process;
 
     public static ChildBootstrap Start(string executable, string bridge, string log, IEnumerable<string> arguments,
-        string? gameLog = null, bool mainThreadProbe = false, bool enableLocalCoop = false)
+        string? gameLog = null, bool mainThreadProbe = false, bool enableLocalCoop = false, bool enableInGameUi = false)
     {
         if (!Environment.Is64BitProcess) throw new PlatformNotSupportedException("Use a Windows x64 .NET process.");
         executable = Path.GetFullPath(executable);
@@ -38,6 +38,7 @@ public sealed class ChildBootstrap : IDisposable
         else info.Environment.Remove("WSM_GAME_LOG");
         info.Environment["WSM_MAIN_THREAD_PROBE"] = mainThreadProbe ? "1" : "0";
         info.Environment["WSM_ENABLE_LOCAL_COOP"] = enableLocalCoop ? "1" : "0";
+        ConfigureUiEnvironment(info, enableInGameUi);
         info.Environment["SteamAppId"] = "3669620";
         info.Environment["SteamGameId"] = "3669620";
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
@@ -58,6 +59,16 @@ public sealed class ChildBootstrap : IDisposable
             }
             throw;
         }
+    }
+
+    internal static void ConfigureUiEnvironment(ProcessStartInfo info, bool enableInGameUi)
+    {
+        info.Environment["WSM_IN_GAME_UI"] = enableInGameUi ? "1" : "0";
+        if (!enableInGameUi) return;
+        foreach (var variable in new[] { "WSM_OBSERVATION_SIGNAL", "WSM_INGAME_STOP_SIGNAL", "WSM_INGAME_TEST_SECONDS" })
+            info.Environment.Remove(variable);
+        info.Environment["WSM_MAIN_THREAD_PROBE"] = "0";
+        info.Environment["WSM_ENABLE_LOCAL_COOP"] = "0";
     }
 
     private void LoadBridge(string bridge, TimeSpan timeout)

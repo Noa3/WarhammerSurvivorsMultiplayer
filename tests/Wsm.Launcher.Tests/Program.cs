@@ -7,6 +7,30 @@ var count = 0;
 var skipped = 0;
 try
 {
+    Run("play child environment isolates activation and inherited test signals", () =>
+    {
+        var info = new System.Diagnostics.ProcessStartInfo("unused");
+        var variables = new[] { "WSM_OBSERVATION_SIGNAL", "WSM_INGAME_STOP_SIGNAL", "WSM_INGAME_TEST_SECONDS", "WSM_ENABLE_LOCAL_COOP", "WSM_MAIN_THREAD_PROBE", "WSM_IN_GAME_UI" };
+        foreach (var variable in variables) info.Environment[variable] = "1";
+        ChildBootstrap.ConfigureUiEnvironment(info, true);
+        Check(info.Environment["WSM_IN_GAME_UI"] == "1", "in-game UI not enabled");
+        foreach (var variable in variables.Take(3)) Check(!info.Environment.ContainsKey(variable), variable + " inherited");
+        Check(info.Environment["WSM_ENABLE_LOCAL_COOP"] == "0" && info.Environment["WSM_MAIN_THREAD_PROBE"] == "0", "probe or coop remained enabled");
+        if (OperatingSystem.IsWindows())
+        {
+            info.FileName = "cmd.exe";
+            info.UseShellExecute = false;
+            info.RedirectStandardOutput = true;
+            info.ArgumentList.Add("/c"); info.ArgumentList.Add("set WSM_");
+            using var process = System.Diagnostics.Process.Start(info)!;
+            var environment = process.StandardOutput.ReadToEnd();
+            Check(process.WaitForExit(5000) && process.ExitCode == 0, "environment fixture did not exit");
+            Check(environment.Contains("WSM_IN_GAME_UI=1", StringComparison.OrdinalIgnoreCase), "child did not receive UI option");
+            foreach (var variable in variables.Take(3)) Check(!environment.Contains(variable + "=", StringComparison.OrdinalIgnoreCase), variable + " reached child");
+        }
+        ChildBootstrap.ConfigureUiEnvironment(info, false);
+        Check(info.Environment["WSM_IN_GAME_UI"] == "0", "legacy probe inherited UI activation");
+    });
     Run("bridge error wins over completion in every probe mode", () =>
     {
         var text = "inspection thread detached\nWSM_MAIN_THREAD_COMPLETE\nstatus: GameManager=found CharacterController=found;\nERROR: failed";
@@ -81,6 +105,26 @@ try
     });
     if (args is [var fixtures] && OperatingSystem.IsWindows())
     {
+        Run("play rejects logs inside the source without creating them", () =>
+        {
+            if (!OperatingSystem.IsWindows()) return;
+            var game = CreateGame("play-log-source");
+            var forbidden = Path.Combine(game, "new-logs");
+            Throws<ArgumentException>(() => { if (OperatingSystem.IsWindows()) InGameLaunch.RunAsync(game, Path.Combine(root, "play-cache"),
+                Path.Combine(fixtures, "Wsm.Bridge.dll"), forbidden).GetAwaiter().GetResult(); });
+            Check(!Directory.Exists(forbidden), "play wrote into source");
+        });
+        Run("play respects cancellation before inspecting or writing", () =>
+        {
+            if (!OperatingSystem.IsWindows()) return;
+            using var cancel = new CancellationTokenSource();
+            cancel.Cancel();
+            var cache = Path.Combine(root, "canceled-play-cache");
+            var logs = Path.Combine(root, "canceled-play-logs");
+            Throws<OperationCanceledException>(() => { if (OperatingSystem.IsWindows()) InGameLaunch.RunAsync(Path.Combine(root, "missing-game"), cache,
+                Path.Combine(fixtures, "Wsm.Bridge.dll"), logs, cancel.Token).GetAwaiter().GetResult(); });
+            Check(!Directory.Exists(cache) && !Directory.Exists(logs), "canceled play wrote files");
+        });
         Run("owned game launch rejects unsafe layout, canceled and unsupported builds before writes", () =>
             OwnedLaunchRegression.Guards(root, CreateInspectableGame("unsupported-owned-launch", fixtures)));
         Run("canceling preparation removes only owned staging and preserves source", () =>
@@ -175,6 +219,15 @@ try
             try { RuntimeProbe.RunAsync(runtime, Path.Combine(root, "missing/Wsm.Bridge.dll"), safe).GetAwaiter().GetResult(); }
             catch (IOException ex) { Check(!ex.Message.Contains("Probe logs must be outside"), "safe sibling rejected"); }
             Check(Directory.Exists(safe), "safe sibling did not pass isolation check");
+        });
+        Run("play-mode bootstrap loads a fixture DLL into its owned child", () =>
+        {
+            var log = Path.Combine(root, "fixture-play.log");
+            using var child = ChildBootstrap.Start(Path.Combine(fixtures, "Wsm.BridgeFixture.exe"),
+                Path.Combine(fixtures, "Wsm.LoadFixture.dll"), log, [], enableInGameUi: true);
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (!File.Exists(log) && DateTime.UtcNow < deadline) Thread.Sleep(25);
+            Check(File.Exists(log) && File.ReadAllText(log).Contains("WSM_FIXTURE_LOADED"), "play-mode bootstrap did not load fixture");
         });
         Run("owned native child loads fixture DLL and is stopped on disposal", () =>
         {

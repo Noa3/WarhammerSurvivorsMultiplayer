@@ -1,20 +1,24 @@
-# Windows x64 development package
+# Windows x64 connection preview
 
-**This is not a playable multiplayer release.** The package contains the working lobby application, the diagnostic launcher and the native inspection bridge. Starting a co-op game, real world replication and progress-preserving run reconnection are not implemented.
+**This is not a playable multiplayer release.** The package contains the native in-game connection panel, its in-process network runtime and a diagnostic launcher. The separate lobby application is retained as a developer tool. Starting a co-op game, real world replication and progress-preserving run reconnection are not implemented.
 
 ## Start without building
 
-For normal use, download `WSM-portable-win-x64.zip` from [GitHub Releases](https://github.com/Noa3/WarhammerSurvivorsMultiplayer/releases), extract its complete `WSM` folder and open `WSM/lobby/Wsm.App.exe`.
+The current repository package starts at `distribution/win-x64/Start-WSM.cmd`. Download or clone the complete repository, enter your installed game folder and accept the save warning. Older tools-preview assets on [GitHub Releases](https://github.com/Noa3/WarhammerSurvivorsMultiplayer/releases) do not contain the newer in-game interface. A newly built portable archive uses `WSM/Start-WSM.cmd` after extraction.
 
-Alternatively, download the repository ZIP or clone it, extract it completely, then open `distribution/win-x64/lobby/Wsm.App.exe` relative to the repository root. Do not download just the executable. See the [distribution guide](../docs/DISTRIBUTION.md) for installation, removal and the experimental Vortex/FOMOD alternative.
+Do not download just an executable. See the [distribution guide](../docs/DISTRIBUTION.md) for installation, removal and the experimental Vortex/FOMOD alternative.
 
 Keep all accompanying files and subdirectories together. This is a self-contained .NET 10 Windows x64 distribution; a separate .NET SDK/runtime installation is not required for the packaged managed applications. Runtime licenses and third-party notices are included under `win-x64/licenses/` and must accompany redistribution.
 
-For local testing, create a lobby and connect another application window to `127.0.0.1` on the same port. For a trusted LAN/VPN, the host must explicitly choose the LAN binding and share their reachable IPv4 address. Connection failures display a reason and next step. See [connection help](../docs/CONNECTION_HELP.md).
+Open **Co-op [F6]** in the launched game. Host a port or join an IPv4 endpoint. Hosting listens on network interfaces; use only a trusted LAN/VPN and necessary private-network firewall access. For local testing, connect a separate peer to `127.0.0.1`. The connection UI follows the game language; see [localization](../docs/LOCALIZATION.md). See [connection help](../docs/CONNECTION_HELP.md).
+
+## Game copies and saves
+
+The entry point stores verified installation copies under `%LOCALAPPDATA%/WarhammerSurvivorsMultiplayer/cache` and logs under its `logs` directory. These survive removal of the extracted package. Close the owned game before reviewing or removing those copies. **Normal saves, the user profile and Steam Cloud are not isolated**; back up valuable data before launch. Do not remove the game's save folders as part of uninstall.
 
 ## Diagnostic tools
 
-`win-x64/launcher/Wsm.Launcher.exe` provides the documented `inspect`, `prepare` and bounded probe commands. `win-x64/bridge/Wsm.Bridge.dll` is the matching native bridge. The original game and its normal Steam/Windows prerequisites are required separately. The native bridge is an MSVC build; a fresh-machine native-runtime configuration is not certified by the local tests.
+`win-x64/launcher/Wsm.Launcher.exe` provides the documented `inspect`, `prepare` and bounded probe commands. `win-x64/bridge/Wsm.Bridge.dll` is the matching native bridge. Its adjacent `Wsm.InGame.Runtime.dll` is the self-contained Native AOT network runtime; keep both files together. The original game and its normal Steam/Windows prerequisites are required separately. The native bridge requires the [Microsoft Visual C++ x64 runtime](https://aka.ms/vc14/vc_redist.x64.exe) (`MSVCP140.dll`, `VCRUNTIME140.dll` and `VCRUNTIME140_1.dll`). It may already be installed with the game. Install the official runtime if these libraries are missing; do not obtain DLLs from arbitrary download sites. A fresh-machine setup remains unverified.
 
 Example from the repository root:
 
@@ -26,7 +30,7 @@ Example from the repository root:
 
 ## Integrity and rebuilding
 
-`win-x64/package-manifest.json` records every packaged runtime file's relative path, size and SHA-256. It also explicitly marks `playableMultiplayer` as false. Download the full directory rather than just an EXE.
+`win-x64/package-manifest.json` records every packaged runtime file's relative path, size and SHA-256. It explicitly marks `inGameConnectionUi` true and `playableMultiplayer` false. Download the full directory rather than just an EXE.
 
 With the source build prerequisites installed, create a new package using:
 
@@ -34,6 +38,6 @@ With the source build prerequisites installed, create a new package using:
 pwsh -File tools/package.ps1 -OutputDirectory artifacts/package-new
 ```
 
-The packaging script refuses an existing output directory rather than overwriting user files. Without `-OutputDirectory`, it targets `distribution/win-x64`, which is already present in a normal checkout. Choose a new destination for each build.
+The packaging script refuses an existing output directory rather than overwriting user files. Without `-OutputDirectory`, it targets `distribution/win-x64`, which is already present in a normal checkout. Choose a new destination for each build. A failure during final copying or notice/manifest generation can leave an incomplete output directory. Preserve it for diagnosis and choose a new destination; do not distribute a folder lacking a successfully verified manifest.
 
 See the [developer guide](../docs/DEVELOPMENT.md#build-and-test) for build requirements and automated checks.

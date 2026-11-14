@@ -43,6 +43,21 @@ dotnet run --project src/Wsm.App -c Release
 
 To build a Windows package, follow [the packaging instructions](../distribution/README.md#integrity-and-rebuilding). The native build produces `artifacts/native-build/Release/Wsm.Bridge.dll`.
 
+## In-game connection preview
+
+`play` is the primary game entry point. It starts an owned game copy and enables the native in-game panel, with Host/Join/Leave and the adjacent Native AOT network library. The packaged `Start-WSM.cmd` supplies its paths and asks for explicit save-risk confirmation.
+
+**Normal saves, the profile and Steam Cloud are not isolated.** Back up valuable saves before starting a game. From the repository root, after canonical verification:
+
+```powershell
+Copy-Item artifacts/ingame-runtime/Wsm.InGame.Runtime.dll artifacts/native-build/Release/
+dotnet run --project src/Wsm.Launcher -- play "G:/SteamLibrary/steamapps/common/Warhammer Survivors" "$PWD/.local/runtime-cache" "$PWD/artifacts/native-build/Release/Wsm.Bridge.dll" "$PWD/.local/game-logs"
+```
+
+Choose your actual game folder. Keep logs outside the original installation and runtime cache. Close the game normally to end the owned launch. F6 hides/shows the panel; it does not disconnect the session. Neither a live connection nor a working menu establishes shared-world gameplay. The [runtime guide](../src/Wsm.InGame.Runtime/README.md) describes the C ABI and standalone real-TCP tests; [localization](LOCALIZATION.md) explains language behavior.
+
+The original `UnityInGameMenuFixture` covers native rendering, language switching, read-only endpoint views, forced foreign selection and OS input. Those SDK-player tests require the matching Unity IL2CPP editor/player build and are separate from the ordinary verification script; they do not launch the installed game.
+
 ## Inspect and prepare
 
 Replace the game path below with your installation directory. `inspect` reads the executable and IL2CPP metadata, reports versions and file fingerprints, and checks the installation's runtime files.

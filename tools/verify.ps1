@@ -14,11 +14,16 @@ function Invoke-Checked {
 }
 Push-Location $root
 try {
-    Invoke-Checked cmake @('-S', 'native', '-B', 'artifacts/native-build', '-A', 'x64')
+    Invoke-Checked cmake @('-S', 'native', '-B', 'artifacts/native-build', '-A', 'x64', '-DBUILD_TESTING=ON')
     Invoke-Checked cmake @('--build', 'artifacts/native-build', '--config', 'Release')
     Invoke-Checked ctest @('--test-dir', 'artifacts/native-build', '-C', 'Release', '--output-on-failure')
     Invoke-Checked dotnet @('build', 'WarhammerSurvivorsMultiplayer.slnx', '-c', 'Release')
     Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.Core.Tests', '-c', 'Release', '--no-build')
+    Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.AotWire.Tests', '-c', 'Release', '--no-build')
+    Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.InGame.Runtime.Tests', '-c', 'Release', '--no-build')
+    Invoke-Checked dotnet @('publish', 'src/Wsm.InGame.Runtime/Wsm.InGame.Runtime.csproj', '-c', 'Release', '-r', 'win-x64', '-o', "$root/artifacts/ingame-runtime")
+    Invoke-Checked python @("$root/tests/Wsm.InGame.Runtime.Tests/dll/run_dll_tests.py", '--dll', "$root/artifacts/ingame-runtime/Wsm.InGame.Runtime.dll")
+    Invoke-Checked python @("$root/tests/Wsm.InGame.Runtime.Tests/dll/lifecycle_test.py", '--dll', "$root/artifacts/ingame-runtime/Wsm.InGame.Runtime.dll")
     Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.Lobby.Tests', '-c', 'Release', '--no-build')
     Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.App.Smoke', '-c', 'Release', '--no-build')
     $windowFixture = "$root/tests/Wsm.OwnedWindowFixture/bin/Release/net10.0-windows/Wsm.OwnedWindowFixture.exe"
@@ -28,6 +33,7 @@ try {
         Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.App.Smoke', '-c', 'Release', '--no-build', '--', '--context-fixture', $env:WSM_UNITY_FIXTURE_INSTALLATION, $contextWork)
     }
     Invoke-Checked python @('-m', 'unittest', 'discover', '-s', 'tests/Packaging', '-v')
+    Invoke-Checked python @('-m', 'unittest', 'discover', '-s', 'tests', '-p', 'package_ingame_test.py', '-v')
     Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.Launcher.Tests', '-c', 'Release', '--no-build', '--', "$root/artifacts/native-build/Release")
     Write-Host 'All automated development checks passed. Live game and multiplayer gameplay are separate acceptance gates.'
 } finally {

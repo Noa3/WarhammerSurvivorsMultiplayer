@@ -105,4 +105,14 @@ HookResult run_window_hook(HMODULE module, HWND window, DWORD thread_id,
     UnhookWindowsHookEx(hook);
     return result;
 }
+HookResult run_window_hook_recovering(HMODULE module, HWND window, DWORD thread_id,
+    void (*callback)(void*), void* context, DWORD timeout_ms, void (*on_timeout)(void*)) {
+    while (IsWindow(window)) {
+        const auto result = run_window_hook(module, window, thread_id, callback, context, timeout_ms);
+        if (result != HookResult::timeout) return result;
+        if (on_timeout) on_timeout(context);
+        Sleep(10);
+    }
+    return HookResult::failed;
+}
 }

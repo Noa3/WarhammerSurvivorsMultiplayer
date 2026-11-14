@@ -47,6 +47,18 @@ class ArchiveTests(unittest.TestCase):
             self.assertEqual(folder.attrib['destination'], 'WSM')
             self.assertEqual(set(n.removeprefix('WSM/') for n in portable.namelist()), set(n.removeprefix('payload/') for n in vortex.namelist() if n.startswith('payload/')))
 
+    def test_ingame_entry_point_is_preserved_exactly(self):
+        name = 'Start-WSM.cmd'
+        data = (ROOT / 'tools/package-templates/Start-WSM.cmd').read_bytes()
+        (self.src / name).write_bytes(data)
+        self.manifest['inGameConnectionUi'] = True
+        self.manifest['files'].append(dict(path=name, bytes=len(data), sha256=hashlib.sha256(data).hexdigest()))
+        self.save()
+        result = self.run_builder()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        with zipfile.ZipFile(self.output / 'WSM-portable-win-x64.zip') as archive:
+            self.assertEqual(archive.read('WSM/' + name), data)
+
     def test_rejects_tampering_and_extra_files(self):
         for kind in ('hash', 'size', 'extra', 'missing', 'case', 'duplicate', 'bool'):
             with self.subTest(kind=kind):

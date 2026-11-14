@@ -10,4 +10,8 @@ namespace wsm {
 enum class HookResult { completed, timeout, failed };
 HookResult run_window_hook(HMODULE module, HWND window, DWORD thread_id,
                            void (*callback)(void*), void* context, DWORD timeout_ms);
+// Retain callback/context ownership across pre-execution timeouts until the
+// window resumes or is destroyed. Intended for required main-thread cleanup.
+HookResult run_window_hook_recovering(HMODULE module, HWND window, DWORD thread_id,
+    void (*callback)(void*), void* context, DWORD timeout_ms, void (*on_timeout)(void*) = nullptr);
 }

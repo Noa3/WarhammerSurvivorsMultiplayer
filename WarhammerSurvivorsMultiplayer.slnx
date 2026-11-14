@@ -3,12 +3,15 @@
     <Project Path="src/Wsm.App/Wsm.App.csproj" />
     <Project Path="src/Wsm.Contracts/Wsm.Contracts.csproj" />
     <Project Path="src/Wsm.Core/Wsm.Core.csproj" />
+    <Project Path="src/Wsm.InGame.Runtime/Wsm.InGame.Runtime.csproj" />
     <Project Path="src/Wsm.Launcher/Wsm.Launcher.csproj" />
     <Project Path="src/Wsm.Lobby/Wsm.Lobby.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Wsm.AotWire.Tests/Wsm.AotWire.Tests.csproj" />
     <Project Path="tests/Wsm.App.Smoke/Wsm.App.Smoke.csproj" />
     <Project Path="tests/Wsm.Core.Tests/Wsm.Core.Tests.csproj" />
+    <Project Path="tests/Wsm.InGame.Runtime.Tests/Wsm.InGame.Runtime.Tests.csproj" />
     <Project Path="tests/Wsm.Launcher.Tests/Wsm.Launcher.Tests.csproj" />
     <Project Path="tests/Wsm.Lobby.Tests/Wsm.Lobby.Tests.csproj" />
     <Project Path="tests/Wsm.OwnedWindowFixture/Wsm.OwnedWindowFixture.csproj" />

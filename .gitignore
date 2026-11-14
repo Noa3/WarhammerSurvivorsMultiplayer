@@ -33,6 +33,28 @@ tests/UnityInteropFixture/*.csproj
 tests/UnityInteropFixture/*.sln
 tests/UnityInteropFixture/*.slnx
 
+# Native in-game UI/runtime fixtures: original sources only, no editor state or generated DLLs.
+tests/UnityInGameMenuFixture/Library/
+tests/UnityInGameMenuFixture/Temp/
+tests/UnityInGameMenuFixture/Logs/
+tests/UnityInGameMenuFixture/UserSettings/
+tests/UnityInGameMenuFixture/Build*/
+tests/UnityInGameMenuFixture/MemoryCaptures/
+tests/UnityInGameMenuFixture/Recordings/
+tests/UnityInGameMenuFixture/*.csproj
+tests/UnityInGameMenuFixture/*.sln*
+tests/UnityInGameMenuFixture/Assets/Plugins/**/*.dll
+tests/UnityInGameRuntimeFixture/Library/
+tests/UnityInGameRuntimeFixture/Temp/
+tests/UnityInGameRuntimeFixture/Logs/
+tests/UnityInGameRuntimeFixture/UserSettings/
+tests/UnityInGameRuntimeFixture/Build*/
+tests/UnityInGameRuntimeFixture/MemoryCaptures/
+tests/UnityInGameRuntimeFixture/Recordings/
+tests/UnityInGameRuntimeFixture/*.csproj
+tests/UnityInGameRuntimeFixture/*.sln*
+tests/UnityInGameRuntimeFixture/Assets/Plugins/**/*.dll
+
 # Local-only analysis, assistant state, captures, and proprietary game data
 .local/
 execplan/

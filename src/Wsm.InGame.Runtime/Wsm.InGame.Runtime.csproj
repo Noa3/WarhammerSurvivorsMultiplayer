@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Self-contained Native AOT shared library loaded by the game process. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishAot>true</PublishAot>
+    <NativeLib>Shared</NativeLib>
+    <StripSymbols>true</StripSymbols>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- The wire format is source-generated; reflection serialization stays disabled. -->
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- SDK 10.0.401 pins ILCompiler 10.0.12, which is affected by GHSA-p3jp-9v83-76w9
+         (Brotli decoder out-of-bounds write, patched in 10.0.14). Override the SDK's pack item
+         instead of adding a PackageReference, which would break the Native AOT publish pipeline. -->
+    <KnownILCompilerPack Update="Microsoft.DotNet.ILCompiler" ILCompilerPackVersion="10.0.15" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Wsm.Core/Wsm.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Wsm.InGame.Runtime.Tests" />
+  </ItemGroup>
+</Project>

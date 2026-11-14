@@ -4,6 +4,19 @@ try
 {
     switch (args)
     {
+        case ["play", var game, var cache, var bridge, var logs] when OperatingSystem.IsWindows():
+            using (var cancellation = new CancellationTokenSource())
+            {
+                ConsoleCancelEventHandler handler = (_, e) => { e.Cancel = true; cancellation.Cancel(); };
+                Console.CancelKeyPress += handler;
+                try { return await InGameLaunch.RunAsync(game, cache, bridge, logs, cancellation.Token); }
+                catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+                {
+                    Console.Error.WriteLine("WSM: Launch canceled; owned child stopped.");
+                    return 130;
+                }
+                finally { Console.CancelKeyPress -= handler; }
+            }
         case ["inspect", var game]:
             Console.WriteLine(GameInspection.Inspect(game).ToJson());
             return 0;
@@ -21,8 +34,8 @@ try
             Console.WriteLine("Original game files were not changed. This does not isolate the game's user-save directory.");
             return 0;
         default:
-            Console.WriteLine("Warhammer Survivors Multiplayer - development tools (not yet a playable co-op mod)");
-            Console.WriteLine("  inspect <game-directory>\n  prepare <game-directory> <new-runtime-directory>\n  probe <runtime-directory> <Wsm.Bridge.dll> <log-directory>\n  ui-probe <runtime-directory> <Wsm.Bridge.dll> <log-directory>\n  coop-probe <runtime-directory> <Wsm.Bridge.dll> <log-directory>");
+            Console.WriteLine("Warhammer Survivors Multiplayer launcher and development tools");
+            Console.WriteLine("  play <game-directory> <cache-directory> <Wsm.Bridge.dll> <log-directory>\n  inspect <game-directory>\n  prepare <game-directory> <new-runtime-directory>\n  probe <runtime-directory> <Wsm.Bridge.dll> <log-directory>\n  ui-probe <runtime-directory> <Wsm.Bridge.dll> <log-directory>\n  coop-probe <runtime-directory> <Wsm.Bridge.dll> <log-directory>");
             return args.Length == 0 ? 0 : 2;
     }
 }

@@ -1,12 +1,22 @@
 # In-game menus and connections
 
-**The current application has a separate Windows lobby. It does not add buttons to Warhammer Survivors yet.** Neither campaign selection nor bestiary/upgrade navigation is connected to the lobby. Do not expect the packaged application to show an in-game menu or start a multiplayer run.
+**The current connection preview adds a native Co-op [F6] panel inside the game.** Host, IP/port Join and Leave use a network runtime in the game process. The panel follows the selected game language. It does not start a shared multiplayer run.
+
+Start `distribution/win-x64/Start-WSM.cmd` from a complete checkout. Enter your installed game folder, read the save warning and confirm. F6 hides/reopens the panel without leaving; Leave explicitly ends membership. Endpoints are IPv4 literals. Text editing is owned by the panel rather than vanilla menu selection; it supports select-all, cursor/selection movement, deletion and copy/paste.
+
+In-game edited endpoints, Host/Join/Leave, separate real test peers and normal exit have been exercised on loopback. Two-computer LAN operation and gameplay input isolation remain separate acceptance gates. Do not assume opening this panel pauses combat or blocks every raw input consumer. See [interface language](LOCALIZATION.md) for font limits.
 
 ## Optional single-player launch
 
-Select **Spiel separat starten (experimentell)**, choose your installed game folder and read the confirmation before proceeding. The application prepares a full separate binary/data copy in `%LOCALAPPDATA%/WSM/runtime-cache` and starts it windowed. Allow additional disk space approximately equal to the copied installation; verification may take time. All included files are hashed so asset-only updates create a fresh cache. Old caches are retained, not silently deleted. Logs are stored in `%LOCALAPPDATA%/WSM/logs`.
+The legacy separate developer lobby retains **Spiel separat starten (experimentell)**. Select it, choose your installed game folder and read the confirmation before proceeding. The application prepares a full separate binary/data copy in `%LOCALAPPDATA%/WSM/runtime-cache` and starts it windowed. Allow additional disk space approximately equal to the copied installation; verification may take time. All included files are hashed so asset-only updates create a fresh cache. Old caches are retained, not silently deleted. Logs are stored in `%LOCALAPPDATA%/WSM/logs`.
 
 **This does not isolate saves, the user profile or Steam Cloud.** The game may still read and modify its normal user data. The separate lobby stays visible and its connection continues. Close the application explicitly to close the child game it started; it never attaches to an already running game. The launch/lobby lifecycle is tested with an original Unity validation player, not a real multiplayer run or the installed game. Cross-process in-game surfaces are not shipped because their visible rendering was unreliable in the Unity test.
+
+## Preview limits
+
+A character queued immediately before switching focus away from the game can be discarded before the next UI tick; check the displayed endpoint after returning. This preview does not promise lossless editing across focus changes. Clipboard commands are implemented, but their OS-level paths have not received the same target-game coverage as direct typing and select-all.
+
+Normal game shutdown with an open panel has been tested. Recovery from an exceptional Unity `Destroy` failure is not guaranteed; a failed teardown can leave the overlay until the owned game process exits. Close the game normally if this occurs. Do not interpret panel closure or a live connection as proof that raw game input, simulation or gameplay is isolated.
 
 ## Campaign selection and preparation
 
@@ -26,6 +36,6 @@ At run end, the party should return to its preparation lobby instead of requirin
 
 The HTTP lobby client sends background heartbeats independently of application window refreshes. Its server still expires a genuinely silent guest. The TCP session library sends a correlated ping every five seconds and requires its matching pong within 30 seconds. Its accept, receive and keepalive loops run independently of the UI/game synchronization context. Tests cover an idle session and a blocked menu context for more than 30 seconds, plus peers that send other traffic but do not answer pings. See the [session API](../src/Wsm.Core/README.md) for framing and timeout details. Neither transport can keep a crashed, sleeping or suspended process alive, and keeping a connection alive does not restore a lost run or save data.
 
-The native observation tools do not yet provide a verified gameplay-update/menu hook in the target game. An original Unity 6000.0.74f1 Windows IL2CPP fixture now verifies the supported interop calls and rejects wrong thread/context inputs; its source is under `tests/UnityInteropFixture`. This is not target-game compatibility or gameplay proof. The original fixture's built Unity runtime is not part of the download.
+The native menu performs Unity calls only through the verified main-thread window callback. The actual game has been used to check menu rendering, text input and network ownership. Original Unity 6000.0.74f1 IL2CPP fixtures independently cover interface behavior, foreign-selection interference and language changes; these checks do not establish shared-world gameplay. Their built Unity players are not distributed.
 
 See [session rules](SESSION_RULES.md) for current host settings, or [connection help](CONNECTION_HELP.md) for failed connections.

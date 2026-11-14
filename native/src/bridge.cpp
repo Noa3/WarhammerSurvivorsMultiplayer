@@ -1,5 +1,6 @@
 #include "wsm/il2cpp_api.h"
 #include "wsm/main_probe.h"
+#include "wsm/ingame_loop.h"
 #include <windows.h>
 #include <chrono>
 #include <cstring>
@@ -106,6 +107,12 @@ DWORD WINAPI worker(void* module) {
     bool coop_enabled = GetEnvironmentVariableW(L"WSM_ENABLE_LOCAL_COOP", coop, 2) == 1 && coop[0] == L'1';
     wchar_t probe[2] = {};
     bool probe_enabled = GetEnvironmentVariableW(L"WSM_MAIN_THREAD_PROBE", probe, 2) == 1 && probe[0] == L'1';
+    wchar_t ui[2] = {};
+    const bool ui_enabled = GetEnvironmentVariableW(L"WSM_IN_GAME_UI", ui, 2) == 1 && ui[0] == L'1';
+    if (ui_enabled && coop_enabled) { log_line("ERROR: in-game lobby cannot invoke experimental local coop"); return 1; }
+    if (ui_enabled && GetEnvironmentVariableW(L"WSM_OBSERVATION_SIGNAL", nullptr, 0) != 0) {
+        log_line("ERROR: deferred observation cannot enable the in-game lobby"); return 1;
+    }
     if (coop_enabled && GetEnvironmentVariableW(L"WSM_OBSERVATION_SIGNAL", nullptr, 0) != 0) {
         log_line("ERROR: deferred observation cannot enable local coop; use a separate explicitly state-changing probe");
         return 1;
@@ -133,8 +140,9 @@ DWORD WINAPI worker(void* module) {
     if (!thread) { log_line("ERROR: il2cpp_thread_attach failed; inspection stopped"); return 1; }
     log_line("IL2CPP domain ready; inspection thread attached");
     inspect(api, domain);
-    if (probe_enabled && observation_requested()) wsm::run_main_probe(static_cast<HMODULE>(module), game, api, domain, coop_enabled, log_line);
-    api.thread_detach(thread);
+    if (ui_enabled) wsm::run_ingame_menu(static_cast<HMODULE>(module), game, api, domain, thread, log_line);
+    else if (probe_enabled && observation_requested()) wsm::run_main_probe(static_cast<HMODULE>(module), game, api, domain, coop_enabled, log_line);
+    if (!ui_enabled) api.thread_detach(thread); // The persistent UI detaches before dispatching.
     log_line("inspection thread detached");
     return 0;
 }

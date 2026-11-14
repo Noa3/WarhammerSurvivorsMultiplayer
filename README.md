@@ -1,47 +1,41 @@
 # Warhammer Survivors Multiplayer
 
-A Windows co-op project for **Warhammer Survivors**, with an IP lobby and game-inspection tools.
+An experimental Windows co-op project for **Warhammer Survivors**, with hosting and IP connections directly inside the game.
 
-> **In development:** You can create and join lobbies, choose loadouts and configure session rules. Multiplayer gameplay is not connected yet, so the application cannot start a co-op run.
+> **Connection preview, not playable co-op yet.** The in-game panel can host, join and leave a real network session. Shared enemies, remote player control, personal upgrades and bots are not connected to gameplay yet.
 
-## Get started
+## Try the in-game panel
 
-1. Open [GitHub Releases](https://github.com/Noa3/WarhammerSurvivorsMultiplayer/releases) and download **WSM-portable-win-x64.zip** from the tools preview.
-2. Extract its complete `WSM` folder into a new location. Keep the accompanying files together.
-3. Open `WSM/lobby/Wsm.App.exe` on Windows x64.
+1. Download the complete repository ZIP or clone this repository.
+2. Open `distribution/win-x64/Start-WSM.cmd` and enter your installed Warhammer Survivors folder.
+3. Read the save warning and confirm the launch. The launcher prepares a separate installation copy and starts the game.
+4. Open **Co-op [F6]** inside the game. Enter an IPv4 address and port, then choose **Host**, **Join** or **Leave**.
 
-The package includes the .NET runtime; Unity and development tools are not needed to use it. The repository ZIP also includes the application under `distribution/win-x64/lobby/Wsm.App.exe`. See the [Windows package guide](distribution/README.md) for contents and checksums, and the [distribution guide](docs/DISTRIBUTION.md) for the experimental Vortex archive and its restrictions.
+Keep the complete Windows package together. The packaged tools include their .NET runtime; Unity and development tools are not required to use them. The native bridge also requires the free [Microsoft Visual C++ x64 runtime](https://aka.ms/vc14/vc_redist.x64.exe), which may already be installed with the game. Your own installed game and its normal Steam prerequisites are required. Older tools-preview assets on [GitHub Releases](https://github.com/Noa3/WarhammerSurvivorsMultiplayer/releases) do not include this newer in-game interface.
 
-### Host or join a lobby
+**The installation copy does not isolate saves or Steam Cloud.** The game still uses its normal profile and can update it. Back up valuable saves before launching. The launcher does not restore saves automatically.
 
-The interface is in German. Create a lobby with your player name and a port; the default port is **7780**. The default loopback binding lets you test two application windows on the same computer using `127.0.0.1`.
+The panel follows the game's language, including live language changes. See [supported languages and font compatibility](docs/LOCALIZATION.md).
 
-For a trusted LAN or VPN, select the LAN binding and share your reachable IPv4 address and port. Guests select **Beitreten** and enter those details.
+## Connecting
 
-- A lobby has four slots, including the host and bots.
-- Each human enters their own hero and weapon IDs, submits the selection and selects **Bereit**.
-- The host can configure bot slots, bot difficulty, the defeat rule, XP sharing, XP-drop layout and pickup sharing.
-- **Bestätigte Regeln** shows the applied rules. Editing a host field creates a draft; **Host-Regeln übernehmen** applies it and resets readiness.
-- The lobby maintains its connection in the background, independently of roster refreshes.
-- Failed connections show the attempted address, a reason and a suggested next step.
+The default port is **7780**. For same-computer testing, a guest connects to `127.0.0.1`. For a trusted LAN or secured VPN, use the host's reachable IPv4 address. Allow only the necessary private-network access in Windows Firewall; do not open a public internet port.
 
-Hero and weapon IDs are currently entered manually and are not checked against the game's unlocks. Session rules are available in the lobby, but do not control a running game yet. **Start anfragen** reports that game integration is unavailable. See [session rules](docs/SESSION_RULES.md) for the sharing options and their current limits. Use the same application revision on every computer; older protocol versions cannot join.
+The transport is unencrypted and has no lobby password. Real host/join/leave and edited endpoints have been tested in the game against separate test peers on loopback. Connections between two computers have not yet been verified.
 
-The lobby uses unencrypted HTTP and has no password. Use a trusted LAN or secured VPN, not a public internet port. Cross-machine connectivity has not yet been tested. For connection problems, see [connection troubleshooting](docs/CONNECTION_HELP.md).
+IP and port fields support selection, cursor movement, deletion, and copy/paste. F6 hides or reopens the panel without leaving the session. **Leave** disconnects; closing the game also ends its session. Connecting does not start a shared run.
 
-### Optional separate game launch
-
-**Spiel separat starten (experimentell)** prepares a separate copy of your installed game and starts it windowed while leaving the lobby accessible. The confirmation warns that **saves and Steam Cloud are not isolated**. This is not a co-op start or an in-game menu. See [launch precautions and cache storage](docs/INGAME_MENUS.md#optional-single-player-launch).
+See the [Windows package guide](distribution/README.md) for files, cache locations and integrity checks. Vortex deployment remains experimental and is not certified; see the [distribution guide](docs/DISTRIBUTION.md).
 
 ## Planned gameplay
 
 The intended co-op mode uses a shared world with synchronized enemies and health, while each player keeps their own progression and upgrade choices. The host will be able to fill vacant slots with bots and choose between spectating after death or ending the run on the first death.
 
-Game synchronization, in-game bots, coordinated pauses, applying XP/pickup rules to game objects and progress-preserving reconnect are still being developed. The [in-game menu guide](docs/INGAME_MENUS.md) explains the intended campaign-to-lobby flow and the boundary between menu browsing, network liveness and gameplay pauses.
+Game synchronization, in-game bots, coordinated pauses, applying XP/pickup rules to game objects and progress-preserving run reconnect are not implemented. The separate developer lobby has additional rule/loadout controls, but those controls do not configure a running game. The [in-game menu guide](docs/INGAME_MENUS.md) explains the intended campaign-to-lobby flow and the boundary between menu browsing, network liveness and gameplay pauses.
 
 ## Development
 
-Build from source with the .NET 10 SDK, PowerShell 7 and the Windows C++ build tools described in the [developer guide](docs/DEVELOPMENT.md). From the repository root:
+Build from source with the .NET 10 SDK, PowerShell 7, Python 3 and the Windows C++ build tools described in the [developer guide](docs/DEVELOPMENT.md). From the repository root:
 
 ```powershell
 pwsh -File tools/verify.ps1
@@ -51,12 +45,12 @@ The script builds the projects and runs native, network, launcher and Windows Fo
 
 Component documentation:
 
-- [Windows lobby application](src/Wsm.App/README.md)
-- [Lobby API](src/Wsm.Lobby/README.md)
+- [Legacy developer lobby application](src/Wsm.App/README.md)
+- [Developer lobby API](src/Wsm.Lobby/README.md)
 - [Session and progression API](src/Wsm.Core/README.md)
 - [Native inspection bridge](native/README.md)
 
-The game-inspection tools have been tested with game **2.1.6**, Unity **6000.0.74f1** and IL2CPP metadata **31** (Steam app **3669620**). Other game versions have not been tested. See the developer guide for [inspection and runtime preparation](docs/DEVELOPMENT.md#inspect-and-prepare) and [game-probe save precautions](docs/DEVELOPMENT.md#game-probes-and-save-data).
+The in-game connection panel has been tested with game **2.1.6**, Unity **6000.0.74f1** and IL2CPP metadata **31** (Steam app **3669620**). Other game versions have not been tested. See the developer guide for [inspection and runtime preparation](docs/DEVELOPMENT.md#inspect-and-prepare) and [game-probe save precautions](docs/DEVELOPMENT.md#game-probes-and-save-data).
 
 ## Help and contributions
 

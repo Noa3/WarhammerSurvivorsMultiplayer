@@ -1,32 +1,37 @@
-Warhammer Survivors Multiplayer - experimental tools for Windows x64
+Warhammer Survivors Multiplayer - in-game connection preview for Windows x64
 
-This is NOT playable multiplayer. It provides a separate lobby application,
-diagnostic launcher and bridge; it does not implement gameplay multiplayer.
-The Windows x64 .NET runtime is included. Keep this folder and its contents
-together. The game is not included and must be obtained separately.
+This is NOT playable multiplayer. Host, Join and Leave are inside the game;
+world replication, remote gameplay and shared runs are not implemented.
+The Windows x64 .NET runtime is included. Keep the complete package together.
+The native bridge also needs Microsoft Visual C++ x64 runtime libraries.
+Official installer: https://aka.ms/vc14/vc_redist.x64.exe
+The game and its normal Steam prerequisites must be obtained separately.
 
-Portable: extract the WSM folder to a clean location and start
-WSM\lobby\Wsm.App.exe. Do not overlay an existing folder. To remove it, delete
-only the WSM folder you extracted, after backing up any files you added.
+Portable: extract the complete WSM folder to a clean location, then run
+WSM\Start-WSM.cmd. Enter your installed game folder and read the save warning.
+Normal saves, profile data and Steam Cloud are NOT isolated. Back up valuable
+saves before confirming. Open Co-op [F6] inside the launched game.
 
-Vortex: this is a candidate FOMOD package, NOT certified Vortex support.
-Install using a compatible game extension; the FOMOD maps payload into WSM
-under its deployment root. Intended launch path after deployment:
-<game-folder>\WSM\lobby\Wsm.App.exe. Verify the actual path first.
-The installed Warhammer Survivors extension 1.0.0 offers unrelated loaders
-when none is installed. Do NOT install a loader just for WSM; use the portable
-ZIP if that prompt cannot be dismissed. The extension can omit README and
-LICENSE-named files from deployment: retain the complete original ZIP and
-notices in payload/licenses. Installation/deploy/purge have not been tested.
-Uninstall using Vortex; do not delete game files or another mod's data.
+Use only a trusted LAN or secured VPN: network data is unencrypted and the
+connection preview has no lobby password. Use IPv4 addresses; default port7780.
+Only permit necessary private-network firewall access, not public exposure.
+Cross-machine connectivity and gameplay input isolation are not certified.
 
-Optional "Spiel separat starten (experimentell)" starts a copied installation,
-not multiplayer. The lobby remains a separate window. It does NOT isolate
-saves, user profile or Steam Cloud. Read and accept the warning before launch.
-Copies/logs are stored in %LOCALAPPDATA%\WSM and survive mod removal. Close WSM
-and its game before reviewing/backing up that folder for optional cleanup.
-Never delete the game's own save folders or cloud data as part of uninstall.
+The launcher creates verified installation copies and logs under
+%LOCALAPPDATA%\WarhammerSurvivorsMultiplayer. These survive package removal.
+Close its game before reviewing/backing up that folder for optional cleanup.
+Never delete the game's saves or Steam Cloud data as part of uninstall.
+Do not overlay an existing package. Remove only the folder you extracted.
 
-The launcher/bridge are diagnostics and the bridge's native runtime
-requirements on a clean machine are not certified. Runtime licenses are in
-licenses/. The manifest lists file hashes; it is not an authenticity signature.
+Vortex: candidate FOMOD only, NOT certified install/deploy/purge support.
+Its payload maps to WSM under the extension's deployment root. Check the
+actual path first; the intended entry is <game-folder>\WSM\Start-WSM.cmd.
+The installed game extension can offer unrelated loader installation and omit
+README/license-named files from deployment. Use the portable alternative if
+setup cannot proceed without unwanted changes, and retain all license notices.
+Uninstall through Vortex; do not remove game files or other mods' data.
+
+The separate lobby is retained only as a legacy developer tool. Its rule
+controls do not configure a running game. Clean-machine native compatibility
+has not been certified. Runtime notices are in licenses/. The checksum
+manifest is an integrity inventory, not an authenticity signature.

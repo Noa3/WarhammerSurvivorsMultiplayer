@@ -1,13 +1,19 @@
 {
   "target": "win-x64",
   "selfContainedDotNet": true,
+  "inGameConnectionUi": true,
   "playableMultiplayer": false,
-  "builtUtc": "2026-11-14T04:25:29.7955506Z",
+  "builtUtc": "2026-11-14T11:22:41.0124981Z",
   "files": [
     {
       "path": "bridge/Wsm.Bridge.dll",
-      "bytes": 64000,
-      "sha256": "26ea7aac2e2c266b732410cc086f2179ab2f042ba6fa2b73199a42b0450b09bc"
+      "bytes": 212480,
+      "sha256": "00239f9303358c70e9fb7f4a983014b64fd995dbca55ea85d61e5e9eca708411"
+    },
+    {
+      "path": "bridge/Wsm.InGame.Runtime.dll",
+      "bytes": 3660288,
+      "sha256": "925bdc382b3f92c0a97b98db4a0a48005744a7fb2d28c15eaeab94f22c2c533e"
     },
     {
       "path": "launcher/clretwrc.dll",
@@ -951,13 +957,13 @@
     },
     {
       "path": "launcher/Wsm.Launcher.dll",
-      "bytes": 52224,
-      "sha256": "6b8a42b7bb6481e2b012576a9f752ab62766d8d1602b85a688870d8015cc79fc"
+      "bytes": 59392,
+      "sha256": "d4d9f98027c83af5fb5c6a9258acda8c7b8a60c606722af9d33949c618aa9c88"
     },
     {
       "path": "launcher/Wsm.Launcher.exe",
       "bytes": 162304,
-      "sha256": "accf7d4d71926715f5488e2e93ffa594e412b46409709cad8e00bc5736790c5d"
+      "sha256": "8c15c5531b608c26a941f85eedaa58ab7c7d4de949d3c87f934267d3b525caad"
     },
     {
       "path": "launcher/Wsm.Launcher.runtimeconfig.json",
@@ -973,6 +979,16 @@
       "path": "licenses/Microsoft.AspNetCore.App.Runtime.win-x64/10.0.12/THIRD-PARTY-NOTICES.TXT",
       "bytes": 56748,
       "sha256": "307d014f65d8482314f1400ddeae7a0cbabb96c2207bcc77f6233cc10588e5d9"
+    },
+    {
+      "path": "licenses/Microsoft.NETCore.App.Runtime.NativeAOT.win-x64/10.0.15/LICENSE.TXT",
+      "bytes": 1139,
+      "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+    },
+    {
+      "path": "licenses/Microsoft.NETCore.App.Runtime.NativeAOT.win-x64/10.0.15/THIRD-PARTY-NOTICES.TXT",
+      "bytes": 78041,
+      "sha256": "6d15e10a101c6bfff2ab4429ed061bf76c456fc4b23ad6b03e0d0f8377148a21"
     },
     {
       "path": "licenses/Microsoft.NETCore.App.Runtime.win-x64/10.0.12/LICENSE.TXT",
@@ -2982,12 +2998,12 @@
     {
       "path": "lobby/Wsm.App.dll",
       "bytes": 54784,
-      "sha256": "d37ada1c5c1cdda914a2244798514062536bc5cfef1b0496ad179e2d35da509d"
+      "sha256": "7d60c5df10df861125f6bab61073c781d61a787fe921180dd6750752ac2f97c5"
     },
     {
       "path": "lobby/Wsm.App.exe",
       "bytes": 162304,
-      "sha256": "8296b94e0a565b6410f39ef95a02284d183f3640dd4f5263474bcde93c9f289f"
+      "sha256": "2ef47991e5e493fd87b6ff52d336b9439657b313f263faa878676719fd365248"
     },
     {
       "path": "lobby/Wsm.App.runtimeconfig.json",
@@ -2997,7 +3013,7 @@
     {
       "path": "lobby/Wsm.Contracts.dll",
       "bytes": 9216,
-      "sha256": "f731e07546ab029474ae661b59dafd2fad7bade9d67bf6090d64a3de9eb48672"
+      "sha256": "8a4eba2a851548c12eac198844f7cf8567f82bd75758ca3455c9f8858aa6e330"
     },
     {
       "path": "lobby/Wsm.Launcher.deps.json",
@@ -3006,13 +3022,13 @@
     },
     {
       "path": "lobby/Wsm.Launcher.dll",
-      "bytes": 52224,
-      "sha256": "6b8a42b7bb6481e2b012576a9f752ab62766d8d1602b85a688870d8015cc79fc"
+      "bytes": 59392,
+      "sha256": "d4d9f98027c83af5fb5c6a9258acda8c7b8a60c606722af9d33949c618aa9c88"
     },
     {
       "path": "lobby/Wsm.Launcher.exe",
       "bytes": 162304,
-      "sha256": "accf7d4d71926715f5488e2e93ffa594e412b46409709cad8e00bc5736790c5d"
+      "sha256": "8c15c5531b608c26a941f85eedaa58ab7c7d4de949d3c87f934267d3b525caad"
     },
     {
       "path": "lobby/Wsm.Launcher.runtimeconfig.json",
@@ -3022,7 +3038,7 @@
     {
       "path": "lobby/Wsm.Lobby.dll",
       "bytes": 51712,
-      "sha256": "9cae7ba501771e1680633576cd46cf5b24495bb809e84e93f270974df24fbb56"
+      "sha256": "ce32a4899d0bfbf5cc94b227d8bd8e86b90efa82e1c1605d87b23b15a33c3b91"
     },
     {
       "path": "lobby/zh-Hans/Microsoft.VisualBasic.Forms.resources.dll",
@@ -3063,6 +3079,11 @@
       "path": "lobby/zh-Hant/System.Windows.Forms.resources.dll",
       "bytes": 329000,
       "sha256": "8bceaabce46062b7baf81a4649b886f734b7ae83bb61a7d29f920e151a4223e2"
+    },
+    {
+      "path": "Start-WSM.cmd",
+      "bytes": 1772,
+      "sha256": "30347abb834078bb2306c1e721731cc240b1544b8336431fe2d2650a410fb734"
     }
   ]
 }

@@ -24,7 +24,7 @@ internal sealed class Peer : IDisposable
     internal Peer(Stream stream, Action close) { this.stream = stream; this.close = close; }
     internal static byte[] Encode(Message message)
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(message);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(message, WireJsonContext.Default.Message);
         if (bytes.Length > MaxFrame) throw new InvalidDataException("Frame too large.");
         return bytes;
     }
@@ -62,7 +62,7 @@ internal sealed class Peer : IDisposable
             var data = new byte[length];
             await stream.ReadExactlyAsync(data, deadline.Token).ConfigureAwait(false);
             Message message;
-            try { message = JsonSerializer.Deserialize<Message>(data) ?? throw new InvalidDataException("Empty frame."); }
+            try { message = JsonSerializer.Deserialize(data, WireJsonContext.Default.Message) ?? throw new InvalidDataException("Empty frame."); }
             catch (JsonException ex) { throw new InvalidDataException("Invalid JSON.", ex); }
             if (message.Type is not ("ping" or "pong")) return message;
             if (heartbeatStop is null) throw new InvalidDataException("Heartbeat before handshake.");
@@ -90,7 +90,7 @@ internal sealed class Peer : IDisposable
             throw new InvalidDataException("Invalid heartbeat.");
     }
     private Task SendHeartbeatAsync(string type, Guid nonce, CancellationToken token) =>
-        SendEncodedAsync(JsonSerializer.SerializeToUtf8Bytes(new { Type = type, Nonce = nonce }), token);
+        SendEncodedAsync(JsonSerializer.SerializeToUtf8Bytes(new HeartbeatMessage(type, nonce), WireJsonContext.Default.HeartbeatMessage), token);
     internal void StartKeepalive()
     {
         heartbeatStop = new CancellationTokenSource();

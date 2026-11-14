@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Plain JIT console runner: the same controller sources are published as Native AOT separately. -->
+    <PublishAot>false</PublishAot>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Wsm.InGame.Runtime/Wsm.InGame.Runtime.csproj" />
+  </ItemGroup>
+</Project>

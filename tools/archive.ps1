@@ -34,7 +34,7 @@ function Assert-SafeName([string]$Path) {
         if ($part -in @('', '.', '..') -or $part.EndsWith('.') -or $part.EndsWith(' ') -or $part -match '^(?i:con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)') { throw "Unsafe component: $Path" }
         if ($part -match '(?i)^(\.local|\.idea|\.git|obj|bin|artifacts|generatedinterop|interop|logs?|credentials?|secrets?|execplan|\.env)(\.|$)') { throw "Excluded content: $Path" }
     }
-    if ($parts[0] -cnotin @('launcher','lobby','bridge','licenses')) { throw "Unexpected package root: $Path" }
+    if ($Path -cne 'Start-WSM.cmd' -and $parts[0] -cnotin @('launcher','lobby','bridge','licenses')) { throw "Unexpected package root: $Path" }
     $name = $parts[-1]
     if ($name -match '(?i)^(GameAssembly\.dll|UnityPlayer\.dll|global-metadata\.dat|WarhammerSurvivors.*\.exe)$' -or $name -match '(?i)\.(pdb|zip|7z|rar|log|pem|pfx|key)$') { throw "Excluded file: $Path" }
     if ($name -match '(?i)\.exe$' -and $name -notin @('createdump.exe','Wsm.App.exe','Wsm.Launcher.exe')) { throw "Unexpected executable: $Path" }
