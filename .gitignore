@@ -64,9 +64,20 @@ tests/UnityPlayerStateFixture/Recordings/
 tests/UnityPlayerStateFixture/*.csproj
 tests/UnityPlayerStateFixture/*.sln*
 tests/UnityPlayerStateFixture/Assets/Plugins/**/*.dll
+tests/UnityCoopRosterFixture/Library/
+tests/UnityCoopRosterFixture/Temp/
+tests/UnityCoopRosterFixture/Logs/
+tests/UnityCoopRosterFixture/UserSettings/
+tests/UnityCoopRosterFixture/Build*/
+tests/UnityCoopRosterFixture/MemoryCaptures/
+tests/UnityCoopRosterFixture/Recordings/
+tests/UnityCoopRosterFixture/*.csproj
+tests/UnityCoopRosterFixture/*.sln*
+tests/UnityCoopRosterFixture/Assets/Plugins/**/*.dll
 
 # Local-only analysis, assistant state, captures, and proprietary game data
 .local/
+report.local/
 execplan/
 .codegraph/
 .hermes/

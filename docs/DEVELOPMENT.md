@@ -60,6 +60,12 @@ The original `UnityInGameMenuFixture` covers native rendering, language switchin
 
 The native [player-state observation reference](PLAYER_STATE_OBSERVATION.md) describes the bounded read-only diagnostic mode and its original IL2CPP fixture. It does not replicate players or the world, and it is not enabled by the normal `play` entry point.
 
+The separate [roster experiment](COOP_ROSTER_DIAGNOSTICS.md) can change menu
+membership and per-player character configuration in an explicitly owned test.
+It is developer-only, not enabled by `play`, and is not a playable multiplayer
+feature. Its original IL2CPP fixture and the actual game's behavior are separate
+acceptance gates.
+
 ## Inspect and prepare
 
 Replace the game path below with your installation directory. `inspect` reads the executable and IL2CPP metadata, reports versions and file fingerprints, and checks the installation's runtime files.

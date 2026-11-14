@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.20)
+project(CoopRosterFixture LANGUAGES CXX)
+add_library(coop_fixture SHARED fixture.cpp ../../../native/src/coop_roster.cpp ../../../native/src/il2cpp_api.cpp ../../../native/src/main_thread_guard.cpp)
+target_include_directories(coop_fixture PRIVATE ../../../native/include)
+target_compile_features(coop_fixture PRIVATE cxx_std_17)

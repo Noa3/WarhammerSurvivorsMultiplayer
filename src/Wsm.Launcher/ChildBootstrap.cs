@@ -65,7 +65,7 @@ public sealed class ChildBootstrap : IDisposable
     {
         info.Environment["WSM_IN_GAME_UI"] = enableInGameUi ? "1" : "0";
         if (!enableInGameUi) return;
-        foreach (var variable in new[] { "WSM_OBSERVATION_SIGNAL", "WSM_INGAME_STOP_SIGNAL", "WSM_INGAME_TEST_SECONDS", "WSM_PLAYER_OBSERVATION_DIR" })
+        foreach (var variable in new[] { "WSM_OBSERVATION_SIGNAL", "WSM_INGAME_STOP_SIGNAL", "WSM_INGAME_TEST_SECONDS", "WSM_PLAYER_OBSERVATION_DIR", "WSM_COOP_ROSTER_DIR" })
             info.Environment.Remove(variable);
         info.Environment["WSM_MAIN_THREAD_PROBE"] = "0";
         info.Environment["WSM_ENABLE_LOCAL_COOP"] = "0";

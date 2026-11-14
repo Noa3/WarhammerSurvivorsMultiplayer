@@ -2,6 +2,7 @@
 #include "wsm/main_probe.h"
 #include "wsm/ingame_loop.h"
 #include "wsm/player_observer.h"
+#include "wsm/coop_roster_probe.h"
 #include <windows.h>
 #include <chrono>
 #include <cstring>
@@ -111,6 +112,14 @@ DWORD WINAPI worker(void* module) {
     wchar_t ui[2] = {};
     const bool ui_enabled = GetEnvironmentVariableW(L"WSM_IN_GAME_UI", ui, 2) == 1 && ui[0] == L'1';
     const bool player_enabled = GetEnvironmentVariableW(L"WSM_PLAYER_OBSERVATION_DIR", nullptr, 0) != 0;
+    const bool roster_enabled = GetEnvironmentVariableW(L"WSM_COOP_ROSTER_DIR", nullptr, 0) != 0;
+    if (roster_enabled && ui_enabled) { log_line("ERROR: roster probe cannot enable the in-game lobby"); return 1; }
+    if (roster_enabled && player_enabled) { log_line("ERROR: roster probe cannot enable player observation"); return 1; }
+    if (roster_enabled && coop_enabled) { log_line("ERROR: roster probe cannot enable legacy local coop"); return 1; }
+    if (roster_enabled && GetEnvironmentVariableW(L"WSM_OBSERVATION_SIGNAL", nullptr, 0) != 0) {
+        log_line("ERROR: roster probe cannot use a second observation signal"); return 1;
+    }
+    if (roster_enabled && !probe_enabled) { log_line("ERROR: roster probe requires the explicit main-thread probe"); return 1; }
     if (player_enabled && ui_enabled) { log_line("ERROR: player observation cannot enable the in-game lobby"); return 1; }
     if (player_enabled && coop_enabled) { log_line("ERROR: player observation cannot enable local coop"); return 1; }
     if (player_enabled && !probe_enabled) { log_line("ERROR: player observation requires the explicit main-thread probe"); return 1; }
@@ -149,9 +158,10 @@ DWORD WINAPI worker(void* module) {
     log_line("IL2CPP domain ready; inspection thread attached");
     inspect(api, domain);
     if (ui_enabled) wsm::run_ingame_menu(static_cast<HMODULE>(module), game, api, domain, thread, log_line);
+    else if (roster_enabled) wsm::run_coop_roster_probe(static_cast<HMODULE>(module), game, api, domain, thread, log_line);
     else if (player_enabled) wsm::run_player_observer(static_cast<HMODULE>(module), game, api, domain, thread, log_line);
     else if (probe_enabled && observation_requested()) wsm::run_main_probe(static_cast<HMODULE>(module), game, api, domain, coop_enabled, log_line);
-    if (!ui_enabled && !player_enabled) api.thread_detach(thread); // Persistent dispatchers own and detach the attachment.
+    if (!ui_enabled && !player_enabled && !roster_enabled) api.thread_detach(thread); // Persistent dispatchers own and detach the attachment.
     log_line("inspection thread detached");
     return 0;
 }
