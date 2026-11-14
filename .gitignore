@@ -54,6 +54,16 @@ tests/UnityInGameRuntimeFixture/Recordings/
 tests/UnityInGameRuntimeFixture/*.csproj
 tests/UnityInGameRuntimeFixture/*.sln*
 tests/UnityInGameRuntimeFixture/Assets/Plugins/**/*.dll
+tests/UnityPlayerStateFixture/Library/
+tests/UnityPlayerStateFixture/Temp/
+tests/UnityPlayerStateFixture/Logs/
+tests/UnityPlayerStateFixture/UserSettings/
+tests/UnityPlayerStateFixture/Build*/
+tests/UnityPlayerStateFixture/MemoryCaptures/
+tests/UnityPlayerStateFixture/Recordings/
+tests/UnityPlayerStateFixture/*.csproj
+tests/UnityPlayerStateFixture/*.sln*
+tests/UnityPlayerStateFixture/Assets/Plugins/**/*.dll
 
 # Local-only analysis, assistant state, captures, and proprietary game data
 .local/

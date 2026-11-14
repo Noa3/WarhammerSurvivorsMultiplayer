@@ -1,0 +1,21 @@
+"""Run the original player-state IL2CPP fixture without foreground activation."""
+import os, re, subprocess, sys
+from collections import Counter
+EXPECTED_CASES = {"no_manager", "null_stage", "empty_players", "two_players", "populated_stopped",
+                  "wrong_native_thread", "wrong_managed_thread", "null_context", "substituted_context",
+                  "worker_thread", "over_cap", "non_finite", "late_non_finite", "null_input", "recovered",
+                  "stage_root_failure", "players_root_failure"}
+root=os.path.abspath(os.path.join(os.path.dirname(__file__),"..",".."))
+local=os.path.join(root,".local")
+player=os.environ.get("WSM_PLAYER_STATE_PLAYER","player-state-v1-player4")
+run=sys.argv[1] if len(sys.argv)>1 else "default"
+exe=os.path.join(local,player,"Fixture.exe");log=os.path.join(local,f"player-state-v1-{run}.log")
+startup=subprocess.STARTUPINFO();startup.dwFlags|=subprocess.STARTF_USESHOWWINDOW;startup.wShowWindow=4
+args=[exe,"-batchmode","-nographics","-logFile",log]
+r=subprocess.run(args,startupinfo=startup,timeout=180)
+text=open(log,encoding="utf-8",errors="replace").read() if os.path.exists(log) else ""
+passed=text.count("=PASS");failed=text.count("=FAIL");summary="PLAYER_TEST RESULT failures=0" in text
+occurrences=Counter(name for name, _ in re.findall(r"PLAYER_TEST ([a-z_]+)=(PASS|FAIL)",text))
+ok=r.returncode==0 and summary and failed==0 and passed==len(EXPECTED_CASES) and occurrences==Counter(EXPECTED_CASES)
+print("PLAYER_STATE run=%s exit=%s pass=%d fail=%d summary=%s log=%s"%(run,r.returncode,passed,failed,summary,log),flush=True)
+sys.exit(0 if ok else 1)

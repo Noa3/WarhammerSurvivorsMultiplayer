@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(PlayerStateFixture LANGUAGES CXX)
+add_library(fixture SHARED fixture.cpp ../../../native/src/player_state_reader.cpp ../../../native/src/il2cpp_api.cpp ../../../native/src/main_thread_guard.cpp)
+target_include_directories(fixture PRIVATE ../../../native/include)
+target_compile_features(fixture PRIVATE cxx_std_17)
+target_compile_definitions(fixture PRIVATE WSM_PLAYER_STATE_TESTING)

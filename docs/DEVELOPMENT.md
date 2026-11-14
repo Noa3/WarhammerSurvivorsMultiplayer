@@ -58,6 +58,8 @@ Choose your actual game folder. Keep logs outside the original installation and 
 
 The original `UnityInGameMenuFixture` covers native rendering, language switching, read-only endpoint views, forced foreign selection and OS input. Those SDK-player tests require the matching Unity IL2CPP editor/player build and are separate from the ordinary verification script; they do not launch the installed game.
 
+The native [player-state observation reference](PLAYER_STATE_OBSERVATION.md) describes the bounded read-only diagnostic mode and its original IL2CPP fixture. It does not replicate players or the world, and it is not enabled by the normal `play` entry point.
+
 ## Inspect and prepare
 
 Replace the game path below with your installation directory. `inspect` reads the executable and IL2CPP metadata, reports versions and file fingerprints, and checks the installation's runtime files.

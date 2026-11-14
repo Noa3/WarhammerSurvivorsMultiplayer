@@ -10,11 +10,11 @@ try
     Run("play child environment isolates activation and inherited test signals", () =>
     {
         var info = new System.Diagnostics.ProcessStartInfo("unused");
-        var variables = new[] { "WSM_OBSERVATION_SIGNAL", "WSM_INGAME_STOP_SIGNAL", "WSM_INGAME_TEST_SECONDS", "WSM_ENABLE_LOCAL_COOP", "WSM_MAIN_THREAD_PROBE", "WSM_IN_GAME_UI" };
+        var variables = new[] { "WSM_OBSERVATION_SIGNAL", "WSM_INGAME_STOP_SIGNAL", "WSM_INGAME_TEST_SECONDS", "WSM_PLAYER_OBSERVATION_DIR", "WSM_ENABLE_LOCAL_COOP", "WSM_MAIN_THREAD_PROBE", "WSM_IN_GAME_UI" };
         foreach (var variable in variables) info.Environment[variable] = "1";
         ChildBootstrap.ConfigureUiEnvironment(info, true);
         Check(info.Environment["WSM_IN_GAME_UI"] == "1", "in-game UI not enabled");
-        foreach (var variable in variables.Take(3)) Check(!info.Environment.ContainsKey(variable), variable + " inherited");
+        foreach (var variable in variables.Take(4)) Check(!info.Environment.ContainsKey(variable), variable + " inherited");
         Check(info.Environment["WSM_ENABLE_LOCAL_COOP"] == "0" && info.Environment["WSM_MAIN_THREAD_PROBE"] == "0", "probe or coop remained enabled");
         if (OperatingSystem.IsWindows())
         {
@@ -26,7 +26,7 @@ try
             var environment = process.StandardOutput.ReadToEnd();
             Check(process.WaitForExit(5000) && process.ExitCode == 0, "environment fixture did not exit");
             Check(environment.Contains("WSM_IN_GAME_UI=1", StringComparison.OrdinalIgnoreCase), "child did not receive UI option");
-            foreach (var variable in variables.Take(3)) Check(!environment.Contains(variable + "=", StringComparison.OrdinalIgnoreCase), variable + " reached child");
+            foreach (var variable in variables.Take(4)) Check(!environment.Contains(variable + "=", StringComparison.OrdinalIgnoreCase), variable + " reached child");
         }
         ChildBootstrap.ConfigureUiEnvironment(info, false);
         Check(info.Environment["WSM_IN_GAME_UI"] == "0", "legacy probe inherited UI activation");
