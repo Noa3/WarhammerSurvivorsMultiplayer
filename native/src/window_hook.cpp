@@ -1,48 +1,108 @@
 #include "wsm/window_hook.h"
-#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <limits>
+#include <mutex>
+
 namespace {
-// 0 unused, 1 armed, 2 running, 3 complete, 4 expired.
-std::atomic<int> state{0};
+enum class State { idle, armed, running, completed, failed };
+std::mutex invocation_mutex;
+std::mutex state_mutex;
+std::condition_variable state_changed;
+State state = State::idle;
+HWND target_window = nullptr;
+UINT wake_message = 0;
+WPARAM generation = 0;
 void (*target)(void*) = nullptr;
 void* target_context = nullptr;
+
 LRESULT CALLBACK hook_proc(int code, WPARAM wparam, LPARAM lparam) {
-    if (code >= 0) {
-        int expected = 1;
-        if (state.compare_exchange_strong(expected, 2)) {
-            target(target_context);
-            state.store(3);
+    void (*callback)(void*) = nullptr;
+    void* context = nullptr;
+    if (code >= 0 && wparam == PM_REMOVE && lparam) {
+        const auto* message = reinterpret_cast<const MSG*>(lparam);
+        {
+            std::lock_guard<std::mutex> lock(state_mutex);
+            if (state == State::armed && message->hwnd == target_window &&
+                message->message == wake_message && message->wParam == generation) {
+                state = State::running;
+                callback = target;
+                context = target_context;
+            }
+        }
+        if (callback) {
+            bool success = false;
+            try {
+                callback(context);
+                success = true;
+            } catch (...) {
+                // Never let a C++ exception cross the Windows callback boundary.
+            }
+            {
+                std::lock_guard<std::mutex> lock(state_mutex);
+                state = success ? State::completed : State::failed;
+            }
+            state_changed.notify_one();
         }
     }
     return CallNextHookEx(nullptr, code, wparam, lparam);
 }
 }
+
 namespace wsm {
 HookResult run_window_hook(HMODULE module, HWND window, DWORD thread_id,
                            void (*callback)(void*), void* context, DWORD timeout_ms) {
     DWORD pid = 0;
     if (!window || !thread_id || !callback || GetWindowThreadProcessId(window, &pid) != thread_id ||
         pid != GetCurrentProcessId()) return HookResult::failed;
-    int expected = 0;
-    if (!state.compare_exchange_strong(expected, 4)) return HookResult::failed;
-    target = callback; target_context = context;
-    state.store(1);
+
+    // Fail overlapping or reentrant calls instead of retaining another context.
+    std::unique_lock<std::mutex> invocation_lock(invocation_mutex, std::try_to_lock);
+    if (!invocation_lock.owns_lock()) return HookResult::failed;
+    // Unhooking does not wait for a hook procedure already chaining through the
+    // OS. Pin the actual code owner, not just an assumed caller-supplied handle.
+    HMODULE code_owner = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+                           reinterpret_cast<LPCWSTR>(&hook_proc), &code_owner) || code_owner != module)
+        return HookResult::failed;
+    const UINT message = RegisterWindowMessageW(L"WSM.WindowHook.Wake.v1");
+    if (!message) return HookResult::failed;
+
+    std::unique_lock<std::mutex> lock(state_mutex);
+    // Never reuse a nonce, because an old post may survive.
+    if (generation == (std::numeric_limits<WPARAM>::max)()) return HookResult::failed;
+    ++generation;
+    target_window = window;
+    wake_message = message;
+    target = callback;
+    target_context = context;
+    state = State::armed;
     HHOOK hook = SetWindowsHookExW(WH_GETMESSAGE, hook_proc, module, thread_id);
-    if (!hook) { state.store(4); return HookResult::failed; }
-    if (!PostMessageW(window, WM_NULL, 0, 0)) {
-        expected = 1;
-        bool cancelled = state.compare_exchange_strong(expected, 4);
-        UnhookWindowsHookEx(hook);
-        while (state.load() == 2) Sleep(10);
-        return !cancelled && state.load() == 3 ? HookResult::completed : HookResult::failed;
+    if (!hook) {
+        state = State::idle;
+        target = nullptr;
+        target_context = nullptr;
+        target_window = nullptr;
+        return HookResult::failed;
     }
-    ULONGLONG deadline = GetTickCount64() + timeout_ms;
-    while (state.load() == 1 && GetTickCount64() < deadline) Sleep(10);
-    expected = 1;
-    bool expired = state.compare_exchange_strong(expected, 4);
+    const bool posted = PostMessageW(window, message, generation, 0) != FALSE;
+    if (posted) {
+        state_changed.wait_for(lock, std::chrono::milliseconds(timeout_ms), [] {
+            return state != State::armed;
+        });
+    }
+    const bool expired = posted && state == State::armed;
+    if (state == State::armed) state = State::idle;
+    // Once started, the callback must finish before its caller's context dies.
+    state_changed.wait(lock, [] { return state != State::running; });
+    const HookResult result = expired ? HookResult::timeout :
+        (state == State::completed ? HookResult::completed : HookResult::failed);
+    state = State::idle;
+    target = nullptr;
+    target_context = nullptr;
+    target_window = nullptr;
+    lock.unlock();
     UnhookWindowsHookEx(hook);
-    // The context is process-lifetime; don't report timeout while a callback is
-    // executing, because its outcome could otherwise arrive after the timeout.
-    while (state.load() == 2) Sleep(10);
-    return expired ? HookResult::timeout : (state.load() == 3 ? HookResult::completed : HookResult::failed);
+    return result;
 }
 }

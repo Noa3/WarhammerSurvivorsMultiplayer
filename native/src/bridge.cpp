@@ -35,6 +35,33 @@ bool scripting_started() {
         if (line.starts_with("[VERSION_INFO][GAME] :: Warhammer Survivors - ")) return true;
     return false;
 }
+bool observation_requested() {
+    const DWORD size = GetEnvironmentVariableW(L"WSM_OBSERVATION_SIGNAL", nullptr, 0);
+    if (!size) return true;
+    if (size > 32768) { log_line("ERROR: observation signal path exceeds supported length"); return false; }
+    std::vector<wchar_t> path(size);
+    if (GetEnvironmentVariableW(L"WSM_OBSERVATION_SIGNAL", path.data(), size) != size - 1 ||
+        !std::filesystem::path(path.data()).is_absolute()) {
+        log_line("ERROR: observation signal must be a stable absolute path"); return false;
+    }
+    log_line("WSM_OBSERVATION_WAITING: read-only sample awaits an explicit operator signal; deadline 15 minutes");
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(15);
+    while (std::chrono::steady_clock::now() < deadline) {
+        const DWORD attributes = GetFileAttributesW(path.data());
+        if (attributes != INVALID_FILE_ATTRIBUTES) {
+            if ((attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
+                log_line("ERROR: observation signal must be a regular non-linked file"); return false;
+            }
+            log_line("WSM_OBSERVATION_REQUESTED"); return true;
+        }
+        if (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND) {
+            log_line("ERROR: observation signal is inaccessible"); return false;
+        }
+        Sleep(50);
+    }
+    log_line("ERROR: observation signal deadline expired without a request");
+    return false;
+}
 void inspect(wsm::Il2CppApi& api, Il2CppDomain* domain) {
     std::size_t count = 0;
     const Il2CppAssembly** assemblies = api.domain_get_assemblies(domain, &count);
@@ -79,6 +106,10 @@ DWORD WINAPI worker(void* module) {
     bool coop_enabled = GetEnvironmentVariableW(L"WSM_ENABLE_LOCAL_COOP", coop, 2) == 1 && coop[0] == L'1';
     wchar_t probe[2] = {};
     bool probe_enabled = GetEnvironmentVariableW(L"WSM_MAIN_THREAD_PROBE", probe, 2) == 1 && probe[0] == L'1';
+    if (coop_enabled && GetEnvironmentVariableW(L"WSM_OBSERVATION_SIGNAL", nullptr, 0) != 0) {
+        log_line("ERROR: deferred observation cannot enable local coop; use a separate explicitly state-changing probe");
+        return 1;
+    }
     if (coop_enabled && !probe_enabled)
         log_line("ERROR: WSM_ENABLE_LOCAL_COOP=1 requires WSM_MAIN_THREAD_PROBE=1; coop unavailable");
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
@@ -102,7 +133,7 @@ DWORD WINAPI worker(void* module) {
     if (!thread) { log_line("ERROR: il2cpp_thread_attach failed; inspection stopped"); return 1; }
     log_line("IL2CPP domain ready; inspection thread attached");
     inspect(api, domain);
-    if (probe_enabled) wsm::run_main_probe(static_cast<HMODULE>(module), game, api, domain, coop_enabled, log_line);
+    if (probe_enabled && observation_requested()) wsm::run_main_probe(static_cast<HMODULE>(module), game, api, domain, coop_enabled, log_line);
     api.thread_detach(thread);
     log_line("inspection thread detached");
     return 0;

@@ -1,4 +1,5 @@
 #include <windows.h>
+#include "wsm/main_thread_guard.h"
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
@@ -11,6 +12,13 @@ static const MethodInfo* method(Il2CppClass* c,const char* name,int arity,int ex
 static Il2CppObject* call(const MethodInfo* m,void* obj=nullptr,void** args=nullptr){if(!m)return nullptr;Il2CppObject* ex=nullptr;auto r=runtime_invoke(m,obj,args,&ex);if(ex){printf("NATIVE exception\n");return nullptr;}return r;}
 static bool integer(Il2CppObject* o,int& out){if(!o)return false;auto c=object_get_class(o);if(strcmp(class_get_namespace(c),"System")||strcmp(class_get_name(c),"Int32"))return false;out=*static_cast<int*>(object_unbox(o));return true;}
 static bool single(Il2CppObject* o,float& out){if(!o)return false;auto c=object_get_class(o);if(strcmp(class_get_namespace(c),"System")||strcmp(class_get_name(c),"Single"))return false;out=*static_cast<float*>(object_unbox(o));return true;}
+extern "C" __declspec(dllexport) int __cdecl fixture_production_guard(int managed, uint32_t os) {
+ auto module=GetModuleHandleW(L"GameAssembly.dll"); wsm::Il2CppApi api; std::string error;
+ if(!module || !wsm::Il2CppApi::resolve(module,api,error) || !api.resolve_probe(module,error)) { printf("PRODUCTION_GUARD resolution failed %s\n",error.c_str()); return 10; }
+ wsm::MainThreadGuard guard; wsm::MainThreadIdentity identity;
+ if(!wsm::MainThreadGuard::create(api,api.domain_get(),guard,error) || !guard.verify(os,managed,identity,error)) { printf("PRODUCTION_GUARD refused %s\n",error.c_str()); return 1; }
+ printf("PRODUCTION_GUARD verified os=%lu managed=%d engine=%d\n",identity.os_thread,identity.managed_thread,identity.engine_main_thread); return 0;
+}
 extern "C" __declspec(dllexport) int __cdecl fixture_test(int managed,uint32_t os,int mode){
  auto module=GetModuleHandleW(L"GameAssembly.dll");if(!module)return 11;
  LOAD(domain_get); LOAD(domain_get_assemblies);LOAD(assembly_get_image);LOAD(class_from_name);LOAD(class_get_methods);LOAD(method_get_name);LOAD(method_get_param_count);LOAD(runtime_invoke);LOAD(object_get_class);LOAD(object_unbox);LOAD(class_get_name);LOAD(class_get_namespace);

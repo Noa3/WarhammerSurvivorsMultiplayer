@@ -1,8 +1,12 @@
 #pragma once
 #include <windows.h>
 namespace wsm {
-// One invocation per process. The callback and its context must remain alive until
-// process exit; an already-running callback cannot safely be cancelled.
+// Calls may be repeated; overlapping or reentrant calls fail. Only messages for
+// the given same-process window and this invocation can start the callback.
+// Callback/context must remain valid until return. Timeout applies only before
+// execution starts; a running callback is always allowed to finish. C++ callback
+// exceptions are caught and reported as failed. The containing module is pinned
+// for process lifetime; module must identify that code owner.
 enum class HookResult { completed, timeout, failed };
 HookResult run_window_hook(HMODULE module, HWND window, DWORD thread_id,
                            void (*callback)(void*), void* context, DWORD timeout_ms);

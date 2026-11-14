@@ -1,4 +1,5 @@
 #include "wsm/main_probe.h"
+#include "wsm/main_thread_guard.h"
 #include "wsm/window_hook.h"
 #include <cstring>
 #include <cstdint>
@@ -10,6 +11,8 @@ struct Context {
     wsm::Il2CppApi api;
     Il2CppClass *manager = nullptr, *character = nullptr, *button = nullptr;
     const MethodInfo *find = nullptr, *get_value = nullptr, *active = nullptr, *enter = nullptr;
+    wsm::MainThreadGuard guard;
+    DWORD window_thread = 0;
     bool coop = false;
     void (*log)(const std::string&) = nullptr;
 };
@@ -77,7 +80,13 @@ bool enumerate(Context& c, Il2CppClass* klass, std::uintptr_t& count, Il2CppObje
 void callback(void* raw) {
     auto& c = *static_cast<Context*>(raw);
     c.log("WSM_WINDOW_CALLBACK thread=" + std::to_string(GetCurrentThreadId()));
-    if (!c.api.thread_current()) { c.log("ERROR: window thread is not attached to IL2CPP; enumeration refused"); return; }
+    wsm::MainThreadIdentity identity;
+    std::string guard_error;
+    if (!c.guard.verify(c.window_thread, 0, identity, guard_error)) {
+        c.log("ERROR: Unity main-thread verification refused enumeration: " + guard_error); return;
+    }
+    c.log("WSM_UNITY_THREAD_VERIFIED native=" + std::to_string(identity.os_thread) +
+          " managed=" + std::to_string(identity.managed_thread) + " engine_main=" + std::to_string(identity.engine_main_thread));
     std::uintptr_t managers = 0, characters = 0, buttons = 0;
     Il2CppObject *array = nullptr;
     if (!enumerate(c, c.manager, managers, &array) ||
@@ -131,6 +140,9 @@ void run_main_probe(HMODULE bridge, HMODULE game, Il2CppApi api, Il2CppDomain* d
     std::string missing;
     if (!ctx.api.resolve_probe(game, missing)) { log("ERROR: main probe missing export " + missing); return; }
     auto& c = ctx;
+    if (!wsm::MainThreadGuard::create(c.api, domain, c.guard, missing)) {
+        log("ERROR: main-thread guard initialization: " + missing); return;
+    }
     auto unity = find_class(c, domain, "UnityEngine.CoreModule.dll", "UnityEngine", "Object");
     auto behaviour = find_class(c, domain, "UnityEngine.CoreModule.dll", "UnityEngine", "Behaviour");
     auto array = find_class(c, domain, "mscorlib.dll", "System", "Array");
@@ -152,6 +164,7 @@ void run_main_probe(HMODULE bridge, HMODULE game, Il2CppApi api, Il2CppDomain* d
     Window window;
     while (GetTickCount64() < deadline && !window.hwnd) { EnumWindows(find_window, reinterpret_cast<LPARAM>(&window)); if (!window.hwnd) Sleep(50); }
     if (!window.hwnd) { log("ERROR: main probe timeout waiting for owned UnityWndClass window"); return; }
+    c.window_thread = window.thread;
     log("WSM_WINDOW_FOUND thread=" + std::to_string(window.thread));
     auto remaining = deadline > GetTickCount64() ? static_cast<DWORD>(deadline - GetTickCount64()) : 0;
     auto result = run_window_hook(bridge, window.hwnd, window.thread, callback, &ctx, remaining);

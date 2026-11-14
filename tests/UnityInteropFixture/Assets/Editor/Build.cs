@@ -7,7 +7,7 @@ public static class BuildFixture {
   var s=EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects,NewSceneMode.Single);
   new GameObject("InteropFixture").AddComponent<Fixture>();
   EditorSceneManager.SaveScene(s,"Assets/Fixture.unity");
-  var o=new BuildPlayerOptions { scenes=new[]{"Assets/Fixture.unity"}, locationPathName=System.IO.Path.GetFullPath("../fixture-v3-player/Fixture.exe"), target=BuildTarget.StandaloneWindows64, options=BuildOptions.Development };
+  var o=new BuildPlayerOptions { scenes=new[]{"Assets/Fixture.unity"}, locationPathName=System.IO.Path.GetFullPath(System.Environment.GetEnvironmentVariable("WSM_FIXTURE_OUTPUT") ?? "../fixture-v3-player/Fixture.exe"), target=BuildTarget.StandaloneWindows64, options=BuildOptions.Development };
   var r=BuildPipeline.BuildPlayer(o); Debug.Log("FIXTURE_BUILD_RESULT="+r.summary.result); if(r.summary.result!=UnityEditor.Build.Reporting.BuildResult.Succeeded) EditorApplication.Exit(2);
  }
 }
