@@ -8,8 +8,44 @@ public sealed class LobbyClient : IAsyncDisposable
 {
     private readonly HttpClient http;
     private bool left;
+    private readonly CancellationTokenSource heartbeatStop = new();
+    private readonly SemaphoreSlim leaveGate = new(1, 1);
+    private readonly object disposeGate = new();
+    private readonly Task heartbeat;
+    private Task? disposal;
+    private Exception? heartbeatError;
+    public Exception? LastHeartbeatError => Volatile.Read(ref heartbeatError);
     public Guid PlayerId { get; }
-    private LobbyClient(HttpClient http, Guid id) { this.http = http; PlayerId = id; }
+    private LobbyClient(HttpClient http, Guid id)
+    {
+        this.http = http; PlayerId = id;
+        // Network liveness must not depend on a UI/game synchronization context or simulation clock.
+        heartbeat = Task.Run(KeepAliveAsync);
+    }
+    private async Task KeepAliveAsync()
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+            while (await timer.WaitForNextTickAsync(heartbeatStop.Token))
+            {
+                try
+                {
+                    using var request = CancellationTokenSource.CreateLinkedTokenSource(heartbeatStop.Token);
+                    request.CancelAfter(TimeSpan.FromSeconds(3));
+                    await HeartbeatAsync(request.Token);
+                    Volatile.Write(ref heartbeatError, null);
+                }
+                catch (OperationCanceledException) when (heartbeatStop.IsCancellationRequested) { return; }
+                catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException)
+                {
+                    Volatile.Write(ref heartbeatError, ex);
+                    if (ex is LobbyRequestException { Code: "session_expired" or "protocol_mismatch" }) return;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (heartbeatStop.IsCancellationRequested) { }
+    }
     public static async Task<LobbyClient> JoinAsync(Uri address, string name, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(address);
@@ -32,6 +68,8 @@ public sealed class LobbyClient : IAsyncDisposable
         if (state.Rules is null || state.Slots is null || state.Slots.Count is < 1 or > 4 ||
             state.Slots.Any(s => s is null || s.WeaponIds is null) || !state.Slots.Any(s => s.PlayerId == PlayerId))
             throw new LobbyRequestException("incompatible_server", "Invalid lobby state response.");
+        try { state.Rules.Validate(); }
+        catch (ArgumentException ex) { throw new LobbyRequestException("incompatible_server", "Invalid host rules.", inner: ex); }
         return state;
     }
     public Task SetLoadoutAsync(string heroId, IEnumerable<string> weaponIds, CancellationToken cancellationToken = default) => Post("/loadout", new LoadoutRequest(heroId, weaponIds.ToArray()), cancellationToken);
@@ -39,10 +77,17 @@ public sealed class LobbyClient : IAsyncDisposable
     public Task HeartbeatAsync(CancellationToken cancellationToken = default) => Post("/heartbeat", new { }, cancellationToken);
     public async Task LeaveAsync(CancellationToken cancellationToken = default)
     {
-        if (left) return;
-        try { await Post("/leave", new { }, cancellationToken); }
-        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized) { /* Expired or already removed. */ }
-        left = true;
+        await leaveGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (left) return;
+            try { await Post("/leave", new { }, cancellationToken); }
+            catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized) { /* Expired or already removed. */ }
+            left = true;
+            heartbeatStop.Cancel();
+            await heartbeat;
+        }
+        finally { leaveGate.Release(); }
     }
     private async Task Post<T>(string path, T body, CancellationToken ct) { using var response = await http.PostAsJsonAsync(path, body, ct); await Check(response, ct); }
     private static async Task<T> ReadJson<T>(HttpResponseMessage response, CancellationToken ct)
@@ -69,5 +114,24 @@ public sealed class LobbyClient : IAsyncDisposable
         // Do not reflect arbitrary remote response bodies or admission tokens into the UI/logs.
         throw new LobbyRequestException(code, $"Lobby request failed (HTTP {(int)response.StatusCode}, {code}).", response.StatusCode);
     }
-    public async ValueTask DisposeAsync() { try { if (!left) await LeaveAsync(); } finally { http.Dispose(); } }
+    public ValueTask DisposeAsync()
+    {
+        lock (disposeGate) return new ValueTask(disposal ??= DisposeCoreAsync());
+    }
+    private async Task DisposeCoreAsync()
+    {
+        Exception? leaveError = null;
+        try { await LeaveAsync(); }
+        catch (Exception ex) { leaveError = ex; throw; }
+        finally
+        {
+            try
+            {
+                heartbeatStop.Cancel();
+                try { await heartbeat; }
+                catch when (leaveError is not null) { /* Preserve the leave failure. */ }
+            }
+            finally { http.Dispose(); heartbeatStop.Dispose(); }
+        }
+    }
 }

@@ -10,6 +10,7 @@ internal static class NetworkRegression
     private static void Check(bool value, string message) { if (!value) throw new Exception(message); }
     public static async Task Run()
     {
+        await SendContextRegression.Run();
         await InterruptedWrite();
         await ProtocolClients();
         await SlowReaderAndOversize();
@@ -78,7 +79,7 @@ internal static class NetworkRegression
         {
             using var tcp = new TcpClient(); await tcp.ConnectAsync(IPAddress.Loopback, host.Port, timeout.Token);
             var stream = tcp.GetStream();
-            await Send(stream, "{\"Type\":\"join\",\"Version\":2,\"Password\":\"x\"}", timeout.Token);
+            await Send(stream, "{\"Type\":\"join\",\"Version\":4,\"Password\":\"x\"}", timeout.Token);
             await Read(stream, timeout.Token); var id = await host.Joined.ReadAsync(timeout.Token);
             await Send(stream, payload, timeout.Token);
             Check(await stream.ReadAsync(new byte[1], timeout.Token) == 0, "Invalid client was not closed");
@@ -88,7 +89,7 @@ internal static class NetworkRegression
         {
             await tcp.ConnectAsync(IPAddress.Loopback, host.Port, timeout.Token);
             var stream = tcp.GetStream();
-            await Send(stream, "{\"Type\":\"join\",\"Version\":2,\"Password\":\"x\"}", timeout.Token);
+            await Send(stream, "{\"Type\":\"join\",\"Version\":4,\"Password\":\"x\"}", timeout.Token);
             var welcome = await Read(stream, timeout.Token);
             var id = await host.Joined.ReadAsync(timeout.Token);
             for (int i = 0; i < 129; i++) await Send(stream, $"{{\"Type\":\"input\",\"Input\":{{\"PlayerId\":\"{id}\",\"X\":0,\"Y\":0}}}}", timeout.Token);
@@ -106,7 +107,7 @@ internal static class NetworkRegression
         await using var host = new SessionHost(new SessionSettings(2, DeathMode.AllDead, 0, BotDifficulty.Normal), "x"); host.Start();
         using var slow = new TcpClient(); slow.ReceiveBufferSize = 1024;
         await slow.ConnectAsync(IPAddress.Loopback, host.Port, timeout.Token);
-        await Send(slow.GetStream(), "{\"Type\":\"join\",\"Version\":2,\"Password\":\"x\"}", timeout.Token);
+        await Send(slow.GetStream(), "{\"Type\":\"join\",\"Version\":4,\"Password\":\"x\"}", timeout.Token);
         await Read(slow.GetStream(), timeout.Token); var slowId = await host.Joined.ReadAsync(timeout.Token);
         await using var healthy = await SessionClient.ConnectAsync(IPAddress.Loopback, host.Port, "x", timeout.Token);
         await host.Joined.ReadAsync(timeout.Token);
@@ -128,7 +129,7 @@ internal static class NetworkRegression
         try { await host.PublishSnapshotAsync(new WorldSnapshot(5, escaped[..(low + 1)]), timeout.Token); throw new Exception("Escaped over-limit frame accepted"); } catch (InvalidDataException) { }
         Check(host.ConnectedClients == 2, "Escaped oversize disconnected peers");
         var watch = Stopwatch.StartNew();
-        for (int i = 0; i < 160; i++) { await host.PublishSnapshotAsync(new WorldSnapshot(i, big), timeout.Token); await Task.Delay(8, timeout.Token); }
+        for (int i = 0; i < 160; i++) { await host.PublishSnapshotAsync(new WorldSnapshot(i + 5, big), timeout.Token); await Task.Delay(8, timeout.Token); }
         var status = host.OutboundStatus(slowId);
         await Task.Delay(250, timeout.Token);
         var after = host.OutboundStatus(slowId);

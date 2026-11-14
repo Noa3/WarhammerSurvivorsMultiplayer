@@ -40,7 +40,8 @@ public sealed class SessionClient : IAsyncDisposable
                 throw new InvalidDataException(response.Error ?? "Invalid welcome.");
             response.Settings.Validate();
             var client = new SessionClient(peer, response.PlayerId, response.Settings);
-            client.receiveTask = client.ReceiveAsync();
+            peer.StartKeepalive();
+            client.receiveTask = Task.Run(client.ReceiveAsync);
             return client;
         }
         catch { tcp.Dispose(); throw; }
@@ -85,7 +86,7 @@ public sealed class SessionClient : IAsyncDisposable
             }
         }
         catch (Exception ex) { if (!stop.IsCancellationRequested || ex is not (OperationCanceledException or ObjectDisposedException or IOException or SocketException)) error = ex; }
-        finally { peer.Dispose(); snapshots.Writer.TryComplete(error); rewards.Writer.TryComplete(error); }
+        finally { peer.Dispose(); await peer.StopKeepaliveAsync(); snapshots.Writer.TryComplete(error); rewards.Writer.TryComplete(error); }
     }
     public ValueTask DisposeAsync()
     {

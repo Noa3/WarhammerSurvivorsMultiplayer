@@ -1,13 +1,20 @@
+using System.Text.Json.Serialization;
+using Wsm.Contracts;
+
 namespace Wsm.Core;
 
 public enum DeathMode { AllDead, AnyDeathEndsRun }
 public enum BotDifficulty { Easy, Normal, Hard }
 public sealed record SessionSettings(int MaxClients, DeathMode DeathMode, int BotCount, BotDifficulty BotDifficulty)
 {
+    [JsonRequired]
+    public CoopPolicy Policy { get; init; } = new();
     internal void Validate()
     {
         if (MaxClients is < 1 or > 8 || BotCount is < 0 or > 8 || !Enum.IsDefined(DeathMode) || !Enum.IsDefined(BotDifficulty))
             throw new ArgumentException("Invalid session settings.");
+        if (Policy is null) throw new ArgumentException("Co-op policy is required.");
+        Policy.Validate();
     }
 }
 public sealed record PlayerInput(Guid PlayerId, float X, float Y)
@@ -23,10 +30,10 @@ public sealed record WorldSnapshot(long Tick, WorldEntity[] Entities)
     public EnemyHealth[] Enemies { get; init; } = [];
     internal bool Valid => Tick >= 0 && Entities is { Length: <= 2048 } && Entities.All(e => e is not null && !string.IsNullOrWhiteSpace(e.Id) && e.Id.Length <= 128 && float.IsFinite(e.X) && float.IsFinite(e.Y)) && Enemies is { Length: <= 2048 } && Enemies.All(e => e is not null && !string.IsNullOrWhiteSpace(e.Id) && e.Id.Length <= 128 && e.MaxHp > 0 && e.Hp >= 0 && e.Hp <= e.MaxHp) && Enemies.Select(e => e.Id).Distinct(StringComparer.Ordinal).Count() == Enemies.Length;
 }
-public enum RewardKind { Xp, Item, Artifact }
+public enum RewardKind { Xp, Item, Artifact, Coins, Consumable }
 public sealed record RewardReceipt(Guid ReceiptId, Guid RecipientId, RewardKind Kind, int Amount, string? ItemId = null)
 {
-    internal bool Valid => ReceiptId != Guid.Empty && RecipientId != Guid.Empty && Enum.IsDefined(Kind) && Amount > 0 && (Kind == RewardKind.Xp ? ItemId is null : !string.IsNullOrWhiteSpace(ItemId) && ItemId.Length <= 128);
+    internal bool Valid => ReceiptId != Guid.Empty && RecipientId != Guid.Empty && Enum.IsDefined(Kind) && Amount > 0 && (Kind is RewardKind.Xp or RewardKind.Coins ? ItemId is null : !string.IsNullOrWhiteSpace(ItemId) && ItemId.Length <= 128);
 }
 
 public sealed class SessionState(DeathMode mode)

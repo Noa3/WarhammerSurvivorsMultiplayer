@@ -1,10 +1,20 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using Wsm.Contracts;
 using Wsm.Lobby;
 
 static class PolicyCases
 {
-    private static LobbyRules Rules(string policy) => JsonSerializer.Deserialize<LobbyRules>("{\"Policy\":" + policy + "}")!;
+    private static LobbyRules Rules(string policy)
+    {
+        // Construct local host settings with defaults; raw wire omissions are tested separately.
+        var supplied = JsonNode.Parse(policy);
+        if (supplied is null) return new() { Policy = null! };
+        var complete = JsonSerializer.SerializeToNode(new CoopPolicy())!;
+        foreach (var pair in supplied.AsObject()) complete[pair.Key] = pair.Value?.DeepClone();
+        return new() { Policy = complete.Deserialize<CoopPolicy>()! };
+    }
     private static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
     public static async Task Run()
     {

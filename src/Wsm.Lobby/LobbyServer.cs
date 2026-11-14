@@ -17,7 +17,7 @@ public sealed class LobbyServer : IAsyncDisposable
     private sealed class Person(Guid id, string name, string? token, SlotKind kind)
     {
         public Guid Id = id; public string Name = name; public string? Token = token; public SlotKind Kind = kind;
-        public string? Hero; public string[] Weapons = []; public bool Ready; public DateTimeOffset Seen = DateTimeOffset.UtcNow;
+        public string? Hero; public string[] Weapons = []; public bool Ready; public bool Leaving; public DateTimeOffset Seen = DateTimeOffset.UtcNow;
     }
     private readonly object gate = new();
     private readonly List<Person> people = [];
@@ -86,6 +86,7 @@ public sealed class LobbyServer : IAsyncDisposable
         } finally {
             lock (gate) {
                 launching = false;
+                if (people.RemoveAll(p => p.Leaving) > 0) { foreach (var p in people) p.Ready = false; version++; }
                 // Lobby expiry is suspended during launch; grant a fresh recovery window on refusal.
                 foreach (var p in people) p.Seen = DateTimeOffset.UtcNow;
             }
@@ -93,7 +94,7 @@ public sealed class LobbyServer : IAsyncDisposable
     }
     private void EnsureMutable() { ObjectDisposedException.ThrowIf(disposed, this); if (started || launching) throw new InvalidOperationException("Lobby already started or launch is in progress."); }
     private static void ValidateText(string? value, string name) { if (string.IsNullOrWhiteSpace(value) || value.Length > 64 || value.Any(char.IsControl)) throw new ArgumentException("Must be 1–64 non-control characters.", name); }
-    private static void ValidateRules(LobbyRules value) { ArgumentNullException.ThrowIfNull(value); if (value.BotCount is < 0 or > 3 || !Enum.IsDefined(value.BotDifficulty) || !Enum.IsDefined(value.DefeatRule)) throw new ArgumentException("Invalid lobby rules.", nameof(value)); }
+    private static void ValidateRules(LobbyRules value) { ArgumentNullException.ThrowIfNull(value); value.Validate(); }
     private static string[] ValidateLoadout(string? hero, IEnumerable<string>? weapons)
     {
         ValidateText(hero, "heroId"); if (weapons is null) throw new ArgumentException("Weapons required.");
@@ -131,11 +132,14 @@ public sealed class LobbyServer : IAsyncDisposable
             LobbySnapshot? snapshot = null;
             lock (gate) {
                 Prune(); var p = people.FirstOrDefault(x => x.Token is not null && CryptographicOperations.FixedTimeEquals(System.Text.Encoding.ASCII.GetBytes(x.Token), System.Text.Encoding.ASCII.GetBytes(tokenValue)));
-                if (p is null) throw new LobbyRejection(401, "session_expired", "Lobby session is absent or no longer valid.");
+                if (p is null || p.Leaving) throw new LobbyRejection(401, "session_expired", "Lobby session is absent or no longer valid.");
                 p.Seen = DateTimeOffset.UtcNow;
                 if (ctx.Request.Method == "GET" && ctx.Request.Path == "/state") snapshot = Copy();
                 else if (ctx.Request.Method == "POST" && ctx.Request.Path == "/heartbeat") { }
-                else if (ctx.Request.Method == "POST" && ctx.Request.Path == "/leave") { if (launching) throw new InvalidOperationException("Launch is in progress; retry leaving after it completes."); people.Remove(p); foreach (var person in people) person.Ready = false; version++; }
+                else if (ctx.Request.Method == "POST" && ctx.Request.Path == "/leave") {
+                    if (launching) p.Leaving = true;
+                    else { people.Remove(p); foreach (var person in people) person.Ready = false; version++; }
+                }
                 else if (request is LoadoutRequest loadout) { EnsureMutable(); SetLoadout(p, loadout.HeroId, ValidateLoadout(loadout.HeroId, loadout.WeaponIds)); }
                 else if (request is ReadyRequest ready) { EnsureMutable(); SetReady(p, ready.Ready ?? throw new ArgumentException("An explicit ready boolean is required.")); }
                 else { ctx.Response.StatusCode = 404; return; }

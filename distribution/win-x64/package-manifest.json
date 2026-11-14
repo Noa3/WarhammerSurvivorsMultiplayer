@@ -2,7 +2,7 @@
   "target": "win-x64",
   "selfContainedDotNet": true,
   "playableMultiplayer": false,
-  "builtUtc": "2026-11-14T00:13:04.9534016Z",
+  "builtUtc": "2026-11-14T03:11:17.4779667Z",
   "files": [
     {
       "path": "bridge/Wsm.Bridge.dll",
@@ -952,12 +952,12 @@
     {
       "path": "launcher/Wsm.Launcher.dll",
       "bytes": 31744,
-      "sha256": "7552d69cefe4c27270b33ac6a851331718a7c1e8cae99d2669a6ad5087c42c62"
+      "sha256": "403a01b657e0a61480a119c321ca694e800186fbdd7e7c2cfe640e454b48c97e"
     },
     {
       "path": "launcher/Wsm.Launcher.exe",
       "bytes": 162304,
-      "sha256": "bca84c68d89c634e6fe22f7529b2e365eb372f6356916c42dfbc53b513b4a4d7"
+      "sha256": "8cbe27f63ab26a54829a6e31fedc90c9666b1780db5e5de377c6de6e9f4824fc"
     },
     {
       "path": "launcher/Wsm.Launcher.runtimeconfig.json",
@@ -2976,18 +2976,18 @@
     },
     {
       "path": "lobby/Wsm.App.deps.json",
-      "bytes": 55774,
-      "sha256": "239b90136defcc98538471b3067c7be77cd1a8864b14276bf90cdcf39526f65e"
+      "bytes": 56165,
+      "sha256": "8b272aceff6e0ce60967b29b7bd61adf760b15b42eda5a9440a2518c985b1413"
     },
     {
       "path": "lobby/Wsm.App.dll",
-      "bytes": 39424,
-      "sha256": "484fb692f87efec0ad8c42c9c31ca3c4238c3654573e4db8111c11eea2c15343"
+      "bytes": 42496,
+      "sha256": "fb53be4c70858682420f4e76a41b33ebb9a7668fd43f6e9ada0e64cb3eff6a01"
     },
     {
       "path": "lobby/Wsm.App.exe",
       "bytes": 162304,
-      "sha256": "92fa496c45c1656913dfc9483dd55ef7121d5237b80059b7009c54d38dd03c78"
+      "sha256": "7e2585fdff34d7af151fa0249b6665d41bc3ca0f9696caff23442467a96faab3"
     },
     {
       "path": "lobby/Wsm.App.runtimeconfig.json",
@@ -2995,9 +2995,14 @@
       "sha256": "056476f35919ec6dbcad2ba89b20bff92dda0b55d1787790c6ed9e3d0e5bcb56"
     },
     {
+      "path": "lobby/Wsm.Contracts.dll",
+      "bytes": 9216,
+      "sha256": "79ca03edf4591611657d5b10cab1a540fe140b00aaf86f9c987fd61fe3ff948e"
+    },
+    {
       "path": "lobby/Wsm.Lobby.dll",
-      "bytes": 48640,
-      "sha256": "0a0021a0356345952c9e8cc93ad89e71b250e983befca7515636c30b9f42ba19"
+      "bytes": 51712,
+      "sha256": "9ae804c113adfc0cccc01bfe1c8d44ced842378eb8c611d8fd2282c8a5dd0014"
     },
     {
       "path": "lobby/zh-Hans/Microsoft.VisualBasic.Forms.resources.dll",

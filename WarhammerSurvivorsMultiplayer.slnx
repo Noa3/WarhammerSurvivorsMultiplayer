@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Wsm.App/Wsm.App.csproj" />
+    <Project Path="src/Wsm.Contracts/Wsm.Contracts.csproj" />
     <Project Path="src/Wsm.Core/Wsm.Core.csproj" />
     <Project Path="src/Wsm.Launcher/Wsm.Launcher.csproj" />
     <Project Path="src/Wsm.Lobby/Wsm.Lobby.csproj" />

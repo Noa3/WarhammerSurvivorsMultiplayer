@@ -1430,7 +1430,18 @@
           }
         }
       },
+      "Wsm.Contracts/1.0.0": {
+        "runtime": {
+          "Wsm.Contracts.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
       "Wsm.Lobby/1.0.0": {
+        "dependencies": {
+          "Wsm.Contracts": "1.0.0"
+        },
         "runtime": {
           "Wsm.Lobby.dll": {
             "assemblyVersion": "1.0.0.0",
@@ -1458,6 +1469,11 @@
     },
     "runtimepack.Microsoft.AspNetCore.App.Runtime.win-x64/10.0.12": {
       "type": "runtimepack",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Wsm.Contracts/1.0.0": {
+      "type": "project",
       "serviceable": false,
       "sha512": ""
     },

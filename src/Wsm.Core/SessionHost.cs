@@ -2,12 +2,13 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
+using Wsm.Contracts;
 
 namespace Wsm.Core;
 
 public sealed class SessionHost : IAsyncDisposable
 {
-    public const int ProtocolVersion = 2;
+    public const int ProtocolVersion = 4;
     public Encounter Encounter { get; } = new();
     private readonly SessionSettings settings;
     private readonly string password;
@@ -16,6 +17,22 @@ public sealed class SessionHost : IAsyncDisposable
     private readonly ConcurrentDictionary<Guid, Outbound> peers = new();
     private readonly ConcurrentQueue<Exception> workerErrors = new();
     private readonly object disposeLock = new();
+    private readonly object snapshotLock = new();
+    private long lastSnapshotTick = -1;
+    private readonly object rewardGate = new();
+    private readonly Dictionary<Guid, RewardEvent> rewardEvents = [];
+    private int rewardCollectionCount;
+    private sealed class RewardEvent(RewardReceipt source, bool shared)
+    {
+        public RewardReceipt Source { get; } = source;
+        public bool Shared { get; } = shared;
+        public Dictionary<Guid, Dictionary<Guid, PlannedReward>> Collections { get; } = [];
+    }
+    private sealed class PlannedReward(byte[] bytes)
+    {
+        public byte[] Bytes { get; } = bytes;
+        public bool Enqueued { get; set; }
+    }
     private Task? disposeTask;
     private readonly ConcurrentDictionary<int, Task> workers = new();
     private readonly SemaphoreSlim slots;
@@ -46,7 +63,7 @@ public sealed class SessionHost : IAsyncDisposable
     {
         if (acceptTask is not null) throw new InvalidOperationException("Already started.");
         listener.Start(settings.MaxClients);
-        acceptTask = AcceptAsync();
+        acceptTask = Task.Run(AcceptAsync);
     }
     private async Task AcceptAsync()
     {
@@ -81,8 +98,9 @@ public sealed class SessionHost : IAsyncDisposable
             }
             player = Guid.NewGuid();
             await peer.SendAsync(new Message("welcome", Version: ProtocolVersion, PlayerId: player, Settings: settings), stop.Token);
+            peer.StartKeepalive();
             outbound = new Outbound(peer, stop.Token);
-            peers[player] = outbound;
+            lock (rewardGate) peers[player] = outbound;
             joined.Writer.TryWrite(player);
             while (!stop.IsCancellationRequested)
             {
@@ -99,9 +117,10 @@ public sealed class SessionHost : IAsyncDisposable
         catch (Exception ex) when (ex is InvalidDataException or IOException or SocketException or OperationCanceledException or ObjectDisposedException) { }
         finally
         {
-            if (player != Guid.Empty && peers.TryRemove(player, out _)) disconnected.Writer.TryWrite(player);
+            lock (rewardGate)
+                if (player != Guid.Empty && peers.TryRemove(player, out _)) disconnected.Writer.TryWrite(player);
             peer.Dispose();
-            try { if (outbound is not null) await outbound.StopAsync(); }
+            try { if (outbound is not null) await outbound.StopAsync(); await peer.StopKeepaliveAsync(); }
             finally { slots.Release(); }
         }
     }
@@ -109,21 +128,59 @@ public sealed class SessionHost : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         if (snapshot.Enemies is not { Length: 0 }) throw new ArgumentException("Enemy health is host encounter state, not caller snapshot data.", nameof(snapshot));
-        snapshot = snapshot with { Enemies = Encounter.Snapshot() };
-        if (!snapshot.Valid) throw new ArgumentException("Invalid snapshot.", nameof(snapshot));
-        token.ThrowIfCancellationRequested();
-        var bytes = Peer.Encode(new Message("snapshot", Snapshot: snapshot));
-        token.ThrowIfCancellationRequested();
-        foreach (var peer in peers.Values) peer.Enqueue(bytes);
+        lock (snapshotLock)
+        {
+            token.ThrowIfCancellationRequested();
+            if (snapshot.Tick <= lastSnapshotTick) throw new ArgumentException("Snapshot tick must increase.", nameof(snapshot));
+            snapshot = snapshot with { Enemies = Encounter.Snapshot() };
+            if (!snapshot.Valid) throw new ArgumentException("Invalid snapshot.", nameof(snapshot));
+            var bytes = Peer.Encode(new Message("snapshot", Snapshot: snapshot));
+            token.ThrowIfCancellationRequested();
+            foreach (var peer in peers.Values) peer.Enqueue(bytes);
+            lastSnapshotTick = snapshot.Tick;
+        }
         await Task.CompletedTask;
     }
     public void PublishReward(Guid recipient, RewardReceipt reward)
     {
         ArgumentNullException.ThrowIfNull(reward);
         if (!reward.Valid || reward.RecipientId != recipient) throw new ArgumentException("Invalid reward or recipient.");
-        if (!peers.TryGetValue(recipient, out var peer)) throw new InvalidOperationException("Recipient is not connected.");
-        var bytes = Peer.Encode(new Message("reward", Reward: reward));
-        if (!peer.EnqueueControl(bytes)) throw new InvalidOperationException("Recipient control queue full or disconnected; connection closed.");
+        lock (rewardGate)
+        {
+            bool shared = reward.Kind == RewardKind.Xp ? settings.Policy.ExperienceSharing == ExperienceSharing.Team :
+                reward.Kind is RewardKind.Coins or RewardKind.Consumable && settings.Policy.PickupSharing == PickupSharing.Team;
+            bool newEvent = false;
+            if (!rewardEvents.TryGetValue(reward.ReceiptId, out var entry))
+            {
+                if (!peers.ContainsKey(recipient)) throw new InvalidOperationException("Recipient is not connected.");
+                if (rewardEvents.Count >= 100_000) throw new InvalidOperationException("Reward event capacity reached.");
+                entry = new RewardEvent(reward, shared);
+                newEvent = true;
+            }
+            else if (entry.Shared != shared || entry.Source.Kind != reward.Kind || entry.Source.Amount != reward.Amount || entry.Source.ItemId != reward.ItemId ||
+                     (entry.Source.RecipientId != recipient && (shared || reward.Kind != RewardKind.Xp)))
+                throw new ArgumentException("Conflicting reward event.");
+
+            if (!entry.Collections.TryGetValue(recipient, out var plan))
+            {
+                if (!peers.ContainsKey(recipient)) throw new InvalidOperationException("Recipient is not connected.");
+                if (rewardCollectionCount >= 100_000) throw new InvalidOperationException("Reward collection capacity reached.");
+                var recipients = shared ? peers.Keys.ToArray() : [recipient];
+                plan = recipients.ToDictionary(id => id, id => new PlannedReward(Peer.Encode(new Message("reward", Reward: reward with { RecipientId = id }))));
+                // Commit only after all capacity checks and receipt encodings succeed.
+                entry.Collections.Add(recipient, plan);
+                if (newEvent) rewardEvents.Add(reward.ReceiptId, entry);
+                rewardCollectionCount++;
+            }
+            bool failed = false;
+            foreach (var (id, item) in plan)
+            {
+                if (item.Enqueued) continue;
+                if (peers.TryGetValue(id, out var peer) && peer.EnqueueControl(item.Bytes)) item.Enqueued = true;
+                else failed = true;
+            }
+            if (failed) throw new InvalidOperationException("Reward control queue full or recipient disconnected; delivery is not guaranteed.");
+        }
     }
     private sealed class Outbound
     {

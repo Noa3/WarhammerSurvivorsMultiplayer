@@ -20,10 +20,12 @@ For a trusted LAN or VPN, select the LAN binding and share your reachable IPv4 a
 
 - A lobby has four slots, including the host and bots.
 - Each human enters their own hero and weapon IDs, submits the selection and selects **Bereit**.
-- The host can configure bot slots, bot difficulty and the defeat rule.
+- The host can configure bot slots, bot difficulty, the defeat rule, XP sharing, XP-drop layout and pickup sharing.
+- **Bestätigte Regeln** shows the applied rules. Editing a host field creates a draft; **Host-Regeln übernehmen** applies it and resets readiness.
+- The lobby maintains its connection in the background, independently of roster refreshes.
 - Failed connections show the attempted address, a reason and a suggested next step.
 
-Hero and weapon IDs are currently entered manually and are not checked against the game's unlocks. Bot and defeat settings are lobby configuration; they do not control a running game yet. **Start anfragen** reports that game integration is unavailable.
+Hero and weapon IDs are currently entered manually and are not checked against the game's unlocks. Session rules are available in the lobby, but do not control a running game yet. **Start anfragen** reports that game integration is unavailable. See [session rules](docs/SESSION_RULES.md) for the sharing options and their current limits. Use the same application revision on every computer; older protocol versions cannot join.
 
 The lobby uses unencrypted HTTP and has no password. Use a trusted LAN or secured VPN, not a public internet port. Cross-machine connectivity has not yet been tested. For connection problems, see [connection troubleshooting](docs/CONNECTION_HELP.md).
 
@@ -31,7 +33,7 @@ The lobby uses unencrypted HTTP and has no password. Use a trusted LAN or secure
 
 The intended co-op mode uses a shared world with synchronized enemies and health, while each player keeps their own progression and upgrade choices. The host will be able to fill vacant slots with bots and choose between spectating after death or ending the run on the first death.
 
-Game synchronization, in-game bots, coordinated pauses, configurable XP/pickup sharing and progress-preserving reconnect are still being developed.
+Game synchronization, in-game bots, coordinated pauses, applying XP/pickup rules to game objects and progress-preserving reconnect are still being developed. The [in-game menu guide](docs/INGAME_MENUS.md) explains the intended campaign-to-lobby flow and the boundary between menu browsing, network liveness and gameplay pauses.
 
 ## Development
 

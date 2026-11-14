@@ -6,12 +6,18 @@ internal static class Program
 {
     private static int result = 1;
     [STAThread]
-    private static int Main()
+    private static int Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
         var host = new LobbyForm(); var guest = new LobbyForm();
         host.Shown += async (_, _) => {
-            try { await Run(host, guest); Console.WriteLine("PASS: real WinForms controls, loopback HTTP, roster/loadouts/readiness/rules/start/leave/shutdown"); result = 0; }
+            try
+            {
+                if (args is ["--policy-ui"]) await PolicyUiRegression.Run();
+                else if (args.Length == 0) { await Run(host, guest); Console.WriteLine("PASS: real WinForms controls, loopback HTTP, roster/loadouts/readiness/rules/start/leave/shutdown"); }
+                else throw new ArgumentException("Supported filter: --policy-ui");
+                result = 0;
+            }
             catch (Exception ex) { Console.Error.WriteLine("FAIL: " + ex); }
             finally { guest.Close(); host.Close(); }
         };
@@ -28,6 +34,7 @@ internal static class Program
     private static ListViewItem Row(LobbyForm f, string name) => C<ListView>(f, "Roster").Items.Cast<ListViewItem>().Single(x => x.Text == name);
     private static async Task Run(LobbyForm host, LobbyForm guest)
     {
+        await PolicyUiRegression.Run();
         await FeedbackRegression.Run();
         await LifecycleRegression.Run();
         var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start(); var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();

@@ -4,7 +4,7 @@ namespace Wsm.Lobby;
 
 public static class LobbyProtocol
 {
-    public const int Version = 2;
+    public const int Version = 4;
 }
 
 public sealed class LobbyRequestException(string code, string message, HttpStatusCode? statusCode = null, Exception? inner = null)

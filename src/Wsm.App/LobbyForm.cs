@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using Wsm.Lobby;
+using Wsm.Contracts;
 
 namespace Wsm.App;
 
@@ -15,6 +16,10 @@ public sealed class LobbyForm : Form
     private readonly NumericUpDown bots = Number("BotCount", 0, 3, 0);
     private readonly ComboBox difficulty = Choice("BotDifficulty", "Einfach", "Normal", "Schwer");
     private readonly ComboBox defeat = Choice("DefeatRule", "Alle Spieler besiegt", "Ein Spieler besiegt");
+    private readonly ComboBox experience = Choice("ExperienceSharing", "Persönliche XP", "Team-XP – voller Betrag für jeden");
+    private readonly ComboBox dropLayout = Choice("ExperienceDropLayout", "Gleiche Positionen", "Persönliche Positionen");
+    private readonly ComboBox pickupSharing = Choice("PickupSharing", "Persönlich", "Münzen und Verbrauchsgegenstände fürs Team");
+    private readonly Label appliedRules = Label("AppliedRules", "Noch keine Host-Regeln bestätigt.");
     private readonly Button host = Button("Host", "Lobby erstellen");
     private readonly Button join = Button("Join", "Beitreten");
     private readonly Button leave = Button("Leave", "Verlassen / trennen");
@@ -40,9 +45,10 @@ public sealed class LobbyForm : Form
         difficulty.SelectedIndex = 1;
         hero.PlaceholderText = "Helden-ID eingeben"; weapons.PlaceholderText = "1–8 Waffen-IDs, durch Komma oder Semikolon getrennt";
         roster.Columns.Add("Name", 140); roster.Columns.Add("Typ", 80); roster.Columns.Add("Held-ID", 170); roster.Columns.Add("Waffen-IDs", 260); roster.Columns.Add("Bereit", 75);
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 0, Padding = new Padding(12), AutoScroll = true };
+        var scroll = new Panel { Name = "LobbyScroll", Dock = DockStyle.Fill, AutoScroll = true };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 0, Padding = new Padding(12) };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 205)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        Controls.Add(layout);
+        Controls.Add(scroll); scroll.Controls.Add(layout);
         AddWide(layout, Label("Development", "Entwicklungsstand: Spielanbindung fehlt. Start ist derzeit nicht möglich."));
         AddWide(layout, Label("Security", "Nur vertrauenswürdiges LAN/VPN: HTTP unverschlüsselt, kein Passwort; nicht öffentlich freigeben. Keine Firewall-Änderungen."));
         AddRow(layout, "Spielername", playerName); AddRow(layout, "Host-Bindung", bind); AddRow(layout, "IP-Adresse des Hosts", ip); AddRow(layout, "Port", port);
@@ -50,8 +56,10 @@ public sealed class LobbyForm : Form
         AddWide(layout, Label("IdsWarning", "Helden- und Waffen-IDs sind noch nicht gegen Spiel geprüft. Keine Spielauswahl verfügbar."));
         AddRow(layout, "Meine Helden-ID", hero); AddRow(layout, "Meine Waffen-IDs", weapons); AddWide(layout, Flow(loadout, ready));
         AddRow(layout, "Bots (max. 4 Plätze gesamt)", bots); AddRow(layout, "Bot-Schwierigkeit", difficulty); AddRow(layout, "Niederlage", defeat);
-        AddWide(layout, Flow(rules, start)); AddWide(layout, Label("RosterLabel", "Lobby-Teilnehmer"));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); layout.Controls.Add(roster, 0, layout.RowCount); layout.SetColumnSpan(roster, 2); layout.RowCount++;
+        AddRow(layout, "Erfahrungspunkte", experience); AddRow(layout, "XP-Drop-Positionen", dropLayout); AddRow(layout, "Pickups", pickupSharing);
+        AddWide(layout, Label("PolicyHelp", "Team-XP zählt einen Drop einmal und gibt jedem den vollen Betrag. Persönliche XP: jeder sammelt selbst. Waffen, Artefakte und Upgrade-Auswahl bleiben persönlich. Regeln werden erst mit der Spielanbindung im Spiel wirksam."));
+        AddWide(layout, Flow(rules, start)); AddWide(layout, appliedRules); AddWide(layout, Label("RosterLabel", "Lobby-Teilnehmer"));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 140)); layout.Controls.Add(roster, 0, layout.RowCount); layout.SetColumnSpan(roster, 2); layout.RowCount++;
         AddWide(layout, status);
         host.Click += async (_, _) => await ExecuteAsync(CreateAsync);
         join.Click += async (_, _) => await ExecuteAsync(JoinAsync, connecting: true);
@@ -60,6 +68,11 @@ public sealed class LobbyForm : Form
         ready.Click += async (_, _) => await ExecuteAsync(SetReadyAsync);
         rules.Click += async (_, _) => await ExecuteAsync(ApplyRulesAsync);
         start.Click += async (_, _) => await ExecuteAsync(StartAsync);
+        experience.SelectedIndexChanged += (_, _) =>
+        {
+            if (experience.SelectedIndex == (int)ExperienceSharing.Team) dropLayout.SelectedIndex = (int)ExperienceDropLayout.Synchronized;
+            UpdateControls();
+        };
         FormClosing += OnClosing;
         UpdateControls();
     }
@@ -73,7 +86,15 @@ public sealed class LobbyForm : Form
     private static void AddRow(TableLayoutPanel t, string label, Control control) { int row = t.RowCount++; t.RowStyles.Add(new RowStyle(SizeType.AutoSize)); t.Controls.Add(Label("Label" + control.Name, label), 0, row); t.Controls.Add(control, 1, row); }
     private static void AddWide(TableLayoutPanel t, Control control) { int row = t.RowCount++; t.RowStyles.Add(new RowStyle(SizeType.AutoSize)); t.Controls.Add(control, 0, row); t.SetColumnSpan(control, 2); }
 
-    private LobbyRules CurrentRules() => new((int)bots.Value, (BotDifficulty)difficulty.SelectedIndex, (DefeatRule)defeat.SelectedIndex);
+    private LobbyRules CurrentRules() => new((int)bots.Value, (BotDifficulty)difficulty.SelectedIndex, (DefeatRule)defeat.SelectedIndex)
+    {
+        Policy = (snapshot?.Rules.Policy ?? new CoopPolicy()) with
+        {
+            ExperienceSharing = (ExperienceSharing)experience.SelectedIndex,
+            ExperienceDropLayout = (ExperienceDropLayout)dropLayout.SelectedIndex,
+            PickupSharing = (PickupSharing)pickupSharing.SelectedIndex
+        }
+    };
     private async Task CreateAsync(CancellationToken ct)
     {
         server = await LobbyServer.StartAsync(bind.SelectedIndex == 0 ? IPAddress.Loopback : IPAddress.Any, (int)port.Value, playerName.Text.Trim(), CurrentRules(), cancellationToken: ct);
@@ -125,7 +146,19 @@ public sealed class LobbyForm : Form
         snapshot = value; roster.BeginUpdate(); roster.Items.Clear();
         foreach (var s in value.Slots) { var item = new ListViewItem(s.Name); item.SubItems.Add(s.Kind.ToString()); item.SubItems.Add(s.HeroId ?? "–"); item.SubItems.Add(string.Join(", ", s.WeaponIds)); item.SubItems.Add(s.Ready ? "Ja" : "Nein"); roster.Items.Add(item); }
         roster.EndUpdate();
-        if (server is null) { bots.Value = value.Rules.BotCount; difficulty.SelectedIndex = (int)value.Rules.BotDifficulty; defeat.SelectedIndex = (int)value.Rules.DefeatRule; }
+        var policy = value.Rules.Policy;
+        if (server is null)
+        {
+            bots.Value = value.Rules.BotCount; difficulty.SelectedIndex = (int)value.Rules.BotDifficulty; defeat.SelectedIndex = (int)value.Rules.DefeatRule;
+            experience.SelectedIndex = (int)policy.ExperienceSharing;
+            dropLayout.SelectedIndex = (int)policy.ExperienceDropLayout;
+            pickupSharing.SelectedIndex = (int)policy.PickupSharing;
+        }
+        appliedRules.Text = $"Bestätigte Regeln: Botplätze: {value.Rules.BotCount} ({difficulty.Items[(int)value.Rules.BotDifficulty]}); Niederlage: {defeat.Items[(int)value.Rules.DefeatRule]}; " +
+            (policy.ExperienceSharing == ExperienceSharing.Team ? "Team-XP (voller Betrag pro Spieler)" : "persönliche XP") + "; " +
+            (policy.ExperienceDropLayout == ExperienceDropLayout.Synchronized ? "gleiche XP-Drop-Positionen" : "persönliche XP-Drop-Positionen") + "; " +
+            (policy.PickupSharing == PickupSharing.Team ? "Münzen/Verbrauchsgegenstände geteilt" : "Pickups persönlich") +
+            ". Gegner und HP gemeinsam; Waffen, Artefakte und Upgrade-Auswahl persönlich.";
         UpdateControls();
     }
     private void UpdateControls()
@@ -134,7 +167,8 @@ public sealed class LobbyForm : Form
         host.Enabled = join.Enabled = can && !connected; leave.Enabled = can && connected;
         loadout.Enabled = ready.Enabled = can && connected && snapshot is not null; rules.Enabled = start.Enabled = can && server is not null && snapshot is not null;
         bind.Enabled = ip.Enabled = port.Enabled = playerName.Enabled = can && !connected;
-        bots.Enabled = difficulty.Enabled = defeat.Enabled = can && client is null;
+        bots.Enabled = difficulty.Enabled = defeat.Enabled = experience.Enabled = pickupSharing.Enabled = can && client is null && snapshot?.Started != true;
+        dropLayout.Enabled = experience.Enabled && experience.SelectedIndex == (int)ExperienceSharing.Personal;
         var ownId = client?.PlayerId ?? (server is not null ? server.Snapshot.Slots[0].PlayerId : Guid.Empty);
         ready.Text = snapshot?.Slots.FirstOrDefault(s => s.PlayerId == ownId && s.Kind != SlotKind.Bot)?.Ready == true ? "Nicht mehr bereit" : "Bereit";
     }
@@ -165,6 +199,7 @@ public sealed class LobbyForm : Form
                     failed = true;
                     // A previous snapshot must not advertise current readiness after connection loss.
                     snapshot = null;
+                    appliedRules.Text = "Host-Regeln nicht aktuell – Verbindung unterbrochen.";
                     roster.Items.Clear();
                     UpdateControls();
                     status.Text = "Aktualisierung fehlgeschlagen: " + ConnectionFeedback.Describe(ex) + " – erneuter Versuch; ggf. trennen und neu beitreten.";
@@ -188,7 +223,7 @@ public sealed class LobbyForm : Form
         Exception? failure = null;
         if (client is not null) { var old = client; client = null; try { await old.DisposeAsync(); } catch (Exception ex) { failure = ex; } }
         if (server is not null) { var old = server; server = null; try { await old.DisposeAsync(); } catch (Exception ex) { failure ??= ex; } }
-        snapshot = null; roster.Items.Clear(); address.Text = ""; status.Text = failure is null ? "Nicht verbunden." : "Getrennt; Aufräumen fehlgeschlagen: " + failure.Message;
+        snapshot = null; roster.Items.Clear(); address.Text = ""; appliedRules.Text = "Noch keine Host-Regeln bestätigt."; status.Text = failure is null ? "Nicht verbunden." : "Getrennt; Aufräumen fehlgeschlagen: " + failure.Message;
         lifetime.Dispose(); lifetime = new CancellationTokenSource();
     }
     private async void OnClosing(object? sender, FormClosingEventArgs e)

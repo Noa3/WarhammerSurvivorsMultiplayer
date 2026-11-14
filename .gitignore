@@ -11,6 +11,19 @@ TestResults/
 *.log
 *.dmp
 
+# Original Unity test fixture sources are public; editor caches are not.
+tests/UnityObservationFixture/Library/
+tests/UnityObservationFixture/Temp/
+tests/UnityObservationFixture/Logs/
+tests/UnityObservationFixture/UserSettings/
+tests/UnityObservationFixture/Build/
+tests/UnityObservationFixture/Builds/
+tests/UnityObservationFixture/MemoryCaptures/
+tests/UnityObservationFixture/Recordings/
+tests/UnityObservationFixture/*.csproj
+tests/UnityObservationFixture/*.sln
+tests/UnityObservationFixture/*.slnx
+
 # Local-only analysis, assistant state, captures, and proprietary game data
 .local/
 execplan/

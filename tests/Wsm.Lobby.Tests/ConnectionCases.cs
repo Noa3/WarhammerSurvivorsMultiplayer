@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -30,6 +31,7 @@ static class ConnectionCases
         await using var full = await LobbyServer.StartAsync(IPAddress.Loopback, 0, "full-host", new(3));
         await ExpectCode(() => LobbyClient.JoinAsync(full.Address, "extra"), "lobby_full", HttpStatusCode.Conflict);
         await InvalidWelcome();
+        await InvalidPolicy();
         Console.WriteLine("PASS connection feedback: protocol mismatch, full lobby, expired session and malformed server");
     }
     private static async Task ExpectCode(Func<Task> action, string code, HttpStatusCode? status = null)
@@ -43,6 +45,53 @@ static class ConnectionCases
         }
         throw new Exception("Expected connection failure: " + code);
     }
+    private static async Task InvalidPolicy()
+    {
+        var builder = WebApplication.CreateSlimBuilder(); builder.Logging.ClearProviders();
+        builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Loopback, 0));
+        await using var fake = builder.Build();
+        var id = Guid.NewGuid();
+        var valid = JsonSerializer.SerializeToNode(new LobbySnapshot(1, new LobbyRules(),
+            [new LobbySlot(id, "fixture", SlotKind.Player, null, [], false)], false), JsonSerializerOptions.Web)!;
+        JsonNode payload = valid.DeepClone();
+        fake.MapPost("/join", () => Results.Json(new { playerId = id, token = new string('A', 64), protocolVersion = LobbyProtocol.Version }));
+        fake.MapGet("/state", () => Results.Json(payload));
+        fake.MapPost("/leave", () => Results.NoContent());
+        await fake.StartAsync();
+        var address = new Uri(fake.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single());
+        await using var client = await LobbyClient.JoinAsync(address, "policy-client");
+        Check((await client.GetStateAsync()).Rules.Policy.IndependentLevelChoices, "Valid policy must pass the actual JSON decoder.");
+        List<Action<JsonNode>> mutations =
+        [
+            p => p["rules"]!.AsObject().Remove("policy"),
+            p => p["rules"]!["policy"] = null,
+            p => p["rules"]!["botCount"] = 4,
+            p => p["rules"]!["botDifficulty"] = 88,
+            p => p["rules"]!["defeatRule"] = 88,
+            p => p["rules"]!["policy"]!["experienceSharing"] = 88,
+            p => p["rules"]!["policy"]!["experienceDropLayout"] = 88,
+            p => p["rules"]!["policy"]!["pickupSharing"] = 88,
+            p => p["rules"]!["policy"]!["recoveryPauseSeconds"] = 121,
+            p => p["rules"]!["policy"]!["disconnectContinuation"] = 88,
+            p => { p["rules"]!["policy"]!["experienceSharing"] = 1; p["rules"]!["policy"]!["experienceDropLayout"] = 1; }
+        ];
+        mutations.Add(p => p["rules"]!["policy"] = new JsonObject());
+        foreach (string field in valid["rules"]!["policy"]!.AsObject().Select(pair => pair.Key))
+            mutations.Add(p => p["rules"]!["policy"]!.AsObject().Remove(field));
+        foreach (string field in new[] { "enemyPositionsSynchronized", "enemyHealthSynchronized", "independentLevelChoices" })
+            mutations.Add(p => p["rules"]!["policy"]![field] = false);
+        var failures = new List<Exception>();
+        foreach (var mutate in mutations)
+        {
+            payload = valid.DeepClone(); mutate(payload);
+            try { await ExpectCode(() => client.GetStateAsync(), "incompatible_server"); }
+            catch (Exception ex) { failures.Add(new Exception("Policy was not rejected: " + payload["rules"]!["policy"]!.ToJsonString(), ex)); }
+            payload = valid.DeepClone();
+            Check((await client.GetStateAsync()).Version == 1, "A valid state must remain readable after rejecting an invalid policy.");
+        }
+        if (failures.Count != 0) throw new AggregateException(failures);
+        Console.WriteLine("PASS wire policy validation: complete required fields, true invariants, invalid rules rejected, valid retry preserved");
+    }
     private static async Task InvalidWelcome()
     {
         var builder = WebApplication.CreateSlimBuilder(); builder.Logging.ClearProviders();
@@ -50,7 +99,7 @@ static class ConnectionCases
         await using var fake = builder.Build();
         int attempt = 0;
         fake.MapPost("/join", () => ++attempt == 1
-            ? Results.Json(new { playerId = Guid.Empty, token = "bad", protocolVersion = 2 })
+            ? Results.Json(new { playerId = Guid.Empty, token = "bad", protocolVersion = LobbyProtocol.Version })
             : Results.Text("private-response-body-not-for-ui", "text/html"));
         await fake.StartAsync();
         var address = new Uri(fake.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single());

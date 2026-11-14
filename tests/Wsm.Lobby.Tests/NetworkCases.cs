@@ -61,14 +61,19 @@ static class NetworkCases
         });
         await Case("heartbeat expiry removes only stale guest", async () => {
             await using var server = await LobbyServer.StartAsync(IPAddress.Loopback, 0, "Host", new LobbyRules());
-            var stale = await LobbyClient.JoinAsync(server.Address, "stale");
+            using var stale = new HttpClient { BaseAddress = server.Address };
+            using var joined = await stale.PostAsJsonAsync("/join", new { name = "stale", protocolVersion = LobbyProtocol.Version });
+            joined.EnsureSuccessStatusCode();
+            using var admitted = JsonDocument.Parse(await joined.Content.ReadAsStringAsync());
+            var staleId = admitted.RootElement.GetProperty("playerId").GetGuid();
+            stale.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", admitted.RootElement.GetProperty("token").GetString());
             await using var active = await LobbyClient.JoinAsync(server.Address, "active");
             server.SetHostLoadout("hero", new[] { "weapon" }); server.SetHostReady(true);
             for (var i = 0; i < 6; i++) { await Task.Delay(3000); await active.HeartbeatAsync(); }
             var snapshot = server.Snapshot;
-            Assert(!snapshot.Slots.Any(x => x.PlayerId == stale.PlayerId) && snapshot.Slots.Any(x => x.PlayerId == active.PlayerId) && !snapshot.Slots.Single(x => x.Kind == SlotKind.Host).Ready, "expiry and ready reset");
-            await ExpectStatus(() => stale.GetStateAsync(), HttpStatusCode.Unauthorized);
-            try { await stale.DisposeAsync(); } catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized) { }
+            Assert(!snapshot.Slots.Any(x => x.PlayerId == staleId) && snapshot.Slots.Any(x => x.PlayerId == active.PlayerId) && !snapshot.Slots.Single(x => x.Kind == SlotKind.Host).Ready, "expiry and ready reset");
+            using var expired = await stale.GetAsync("/state");
+            Assert(expired.StatusCode == HttpStatusCode.Unauthorized, "expired raw guest must lose admission");
         });
     }
     sealed class FixtureCoordinator : IGameLaunchCoordinator
