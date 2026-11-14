@@ -16,7 +16,7 @@ assembly: `Rewired.Player.id`), `Assets/Runtime` (`VampireSurvivors.Runtime`
 assembly: `GameManager.MainPlayers`/`Stage`/`IsGameRunning`, `CharacterController`, enums),
 `Assets/PlayerFixture.cs` (driver, owns the expected main-thread identities),
 `Native/fixture.cpp` (exports `fixture_test` and `fixture_upgrade`, drives the
-production scene reader and explicit upgrade-context diagnostic).
+production scene reader and explicit context/selection diagnostics).
 
 Build and run from the repository root (Git Bash), Unity 6000.0.74f1 Windows
 IL2CPP module + MSVC x64:
@@ -41,7 +41,7 @@ python tests/UnityPlayerStateFixture/run_fixture.py
 never activated, no input touched) and needs both exit code 0 and the driver's
 `PLAYER_TEST RESULT failures=0` line plus exactly one passing occurrence of
 every named case in `EXPECTED_CASES`, including the 17 baseline scene cases
-and the upgrade-context cases below, so an early exit or changed case membership
+and the context/selection cases below, so an early exit or changed case membership
 cannot look green. It defaults to
 `.local/player-state-v1-player4`, the output path in the example above. Rebuild
 that player from the current sources before running it, or choose a fresh path
@@ -71,7 +71,7 @@ Runtime facts observed in the real IL2CPP player (not assumptions):
   last decision (`status` + detail) on every failure.
 
 `link.xml` preserves the fixture assemblies and the reflection targets the
-reader needs (`UnityEngine.Object`, `UnitySynchronizationContext`,
+reader needs (`UnityEngine.Object`, `UnityEngine.GameObject`, `UnitySynchronizationContext`,
 `System.Array`, `System.Threading.*`). Stripping in a real game differs.
 
 Checks performed by `Assets/PlayerFixture.cs` (all against the production
@@ -120,9 +120,32 @@ oracle also compares the seeded group/list flags and entry vector. The reader
 checks the closed `UIGroup<Transform>` / `List<Transform>` metadata and canonical
 Transform return identity before using the framework list accessors.
 
-These checks do not call `UIGroup.GetActiveItem`, native liveness/active-state
+The structural query does not call `UIGroup.GetActiveItem`, native liveness/active-state
 APIs, Transform child enumeration or component queries. A present container
 reference does not establish an active selection or valid upgrade-card contents.
+
+The separate explicit `read_upgrade_selection` query adds canonical
+`Object.op_Implicit`, `Component.get_gameObject` and
+`GameObject.get_activeInHierarchy` calls on the guarded Unity main thread.
+Named `upgrade_selection_*` cases verify live/active, inactive and destroyed
+containers, first-active ordering with a later active entry, an absent group,
+wrong-thread refusal, a later actor failure after observing the containers,
+the entry bound and a stopped populated run. The error/NotReady oracles compare
+all seeded flags, selection index and ordered vectors as well as actor/context
+values. The ordinary structural query must reset these additional observations
+to unrequested defaults on a successful capture, without requiring the extra
+Unity method bindings.
+
+`UnityEngine.GameObject` is preserved explicitly for reflective access to
+`get_activeInHierarchy`. Before this preservation, the additional query refused
+its missing/invalid method metadata while all existing 38 cases still passed;
+the production metadata checks were not relaxed. Actual stripping in the target
+game remains a separate compatibility question.
+
+Both queries reject overlarge lists rather than returning a partial negative.
+The selection query observes every bounded entry and reports the first live
+and active match; it is not claimed equivalent to the stock native selection
+or its timing. No Transform children, card components or card data are observed.
 
 The reader trusts the inspected runtime's provenance. It resolves named contracts
 and checks important class/image identities, but is not an admission boundary for

@@ -54,6 +54,7 @@ stop the diagnostic loop.
 | --- | --- |
 | `inspect` | Capture configured/enrolled IDs, optional menu configuration and current player observation. |
 | `upgradeContext:<pid>` | Explicit read-only upgrade-context query in an existing run; never enters roster mutation dispatch. |
+| `upgradeSelection:<pid>` | Separate opt-in context query with bounded Unity-reported container liveness and hierarchy activity. |
 | `enroll:<pid>:<id>` | Add one existing configured player to the exact one-player baseline. |
 | `select:<pid>:<id>` | Select an enrolled menu player, not a hero; no exclusive input control or vibration. |
 | `copy:<pid>:<id>` | Copy the stock menu's currently bought character into that player's existing selection entry. |
@@ -78,7 +79,8 @@ native asset or correct behavior. Getter names do not establish purity.
 
 ### Explicit upgrade-context query
 
-Only `upgradeContext:<pid>` invokes the extra reader. Ordinary commands report
+`upgradeContext:<pid>` invokes the structural context reader. Apart from the
+separate selection query below, ordinary commands report
 `upgradeContext.state` as `not_requested`; optional Wilson/equipment metadata
 is not required by normal reader initialization or observation. The new query
 still counts toward the same eight-request budget and uses the verified main
@@ -121,6 +123,55 @@ flow, not the upgrade: choices remained empty and `CanCharacterReceivePass`
 still threw. A missing group, null list or empty list was not observed at that
 post-exception snapshot; active selection, native liveness, child components
 and the exact throw-time operand remain unverified.
+
+### Explicit Unity-reported selection query
+
+`upgradeSelection:<pid>` is a separate opt-in operation, not an expansion of
+the structural query. After the same thread/run guards it additionally resolves
+the exact canonical `UnityEngine.CoreModule.dll` methods
+`Object.op_Implicit(Object): Boolean`, `Component.get_gameObject(): GameObject`
+and `GameObject.get_activeInHierarchy(): Boolean`. Missing or incompatible
+methods refuse the query; normal scene reads and `upgradeContext` do not require
+these additional bindings.
+
+For a successful capture, `upgradeContext.choiceSelection` contains:
+
+- `observed: true`, including a valid capture with no group/list entries;
+- `unityAlive` and `activeInHierarchy`, ordered to match
+  `choiceContainerItemReferences`, with false values for absent managed entries;
+- `selectedContainerSlot`, the first Unity-reported live and active entry, or
+  `-1` when the complete bounded observation found none.
+
+Destroyed Unity objects can retain a managed reference while reporting false
+truthiness. The GameObject/activity getters are called only for reported live
+entries. All entries up to the eight-entry bound are observed, even after the
+first active match; a later invocation, type or rooting error refuses the whole
+capture. Errors and `not_ready` suppress all selection values instead of exposing
+partial or stale flags. The query uses the existing PID and request budget and
+never enters roster mutation dispatch.
+
+This is a diagnostic selection, **not proof of the stock `GetActiveItem` result
+or throw-time state**. Equivalence between `op_Implicit` and the stock native
+inline check is unproven. The query does not invoke `GetActiveItem`, enumerate
+Transform children, query card components, change active state or repair a page.
+It contains no explicit setter/mutation call; purity of the invoked native
+methods and scene stability across calls are not established. The original
+IL2CPP fixture covers live, inactive and destroyed containers, first-active
+ordering, absent groups, thread refusal, late-error atomicity, the entry cap and
+a stopped populated run. Those tests are not target-game or gameplay evidence.
+
+In a separate target-game 2.1.6 capture at the first empty two-hero Level-2
+upgrade, the query completed with `selectedContainerSlot: 2`,
+`choiceContainerItemReferences: [false, false, true]`,
+`unityAlive: [false, false, true]` and
+`activeInHierarchy: [false, false, true]`. The preceding ordinary Level-1 pause
+reported `not_ready`. Both actual heroes still matched `[5012, 5001]`; both
+reached Level 2 with equal XP. The upgrade remained empty and
+`CanCharacterReceivePass` still threw. An absent, destroyed or inactive
+diagnostic selected container was therefore not observed at that post-exception
+snapshot. Card components/data and the exact original throw operand remain
+unverified. The owned game closed normally; no in-run roster rollback or page
+mutation was attempted.
 
 ## Mutation boundaries
 

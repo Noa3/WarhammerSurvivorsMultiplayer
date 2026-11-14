@@ -190,6 +190,12 @@ PlayerReadStatus PlayerStateReader::read(SceneStateSnapshot& output,std::string&
 }
 
 PlayerReadStatus PlayerStateReader::read_upgrade_context(UpgradeContextSnapshot& output,std::string& error) const {
+    return read_upgrade_context_impl(output,error,false);
+}
+PlayerReadStatus PlayerStateReader::read_upgrade_selection(UpgradeContextSnapshot& output,std::string& error) const {
+    return read_upgrade_context_impl(output,error,true);
+}
+PlayerReadStatus PlayerStateReader::read_upgrade_context_impl(UpgradeContextSnapshot& output,std::string& error,bool observe_selection) const {
     error.clear();
     if(!impl_){error="Reader not initialized";return PlayerReadStatus::Error;}
     const auto& p=*impl_;
@@ -290,6 +296,27 @@ PlayerReadStatus PlayerStateReader::read_upgrade_context(UpgradeContextSnapshot&
        !group_count || !p.result_image(group_item,"UnityEngine.Transform","UnityEngine.CoreModule.dll","UnityEngine","Transform") ||
        p.class_from_type(p.a.method_get_return_type(group_item))!=transform_class)
         return fail("Invalid choice container items metadata");
+    Il2CppClass* game_object_class=nullptr;
+    const MethodInfo *object_alive=nullptr,*component_game_object=nullptr,*active_in_hierarchy=nullptr;
+    if(observe_selection) {
+        auto unity_object=p.klass(p.domain,"UnityEngine.CoreModule.dll","UnityEngine","Object");
+        auto component=p.klass(p.domain,"UnityEngine.CoreModule.dll","UnityEngine","Component");
+        game_object_class=p.klass(p.domain,"UnityEngine.CoreModule.dll","UnityEngine","GameObject");
+        object_alive=p.method(unity_object,"op_Implicit","System.Boolean","UnityEngine.Object",true);
+        component_game_object=p.method(component,"get_gameObject","UnityEngine.GameObject");
+        active_in_hierarchy=p.method(game_object_class,"get_activeInHierarchy","System.Boolean");
+        if(!unity_object || !component || !game_object_class)return fail("Missing canonical Unity selection classes");
+        if(!p.result_image(object_alive,"System.Boolean","mscorlib.dll","System","Boolean") ||
+           p.class_from_type(p.a.method_get_param(object_alive,0))!=unity_object ||
+           p.class_from_type(p.a.method_get_return_type(object_alive))!=p.boolclass)
+            return fail("Missing or invalid UnityEngine.Object.op_Implicit metadata");
+        if(!p.result_image(component_game_object,"UnityEngine.GameObject","UnityEngine.CoreModule.dll","UnityEngine","GameObject") ||
+           p.class_from_type(p.a.method_get_return_type(component_game_object))!=game_object_class)
+            return fail("Missing or invalid UnityEngine.Component.get_gameObject metadata");
+        if(!p.result_image(active_in_hierarchy,"System.Boolean","mscorlib.dll","System","Boolean") ||
+           p.class_from_type(p.a.method_get_return_type(active_in_hierarchy))!=p.boolclass)
+            return fail("Missing or invalid UnityEngine.GameObject.get_activeInHierarchy metadata");
+    }
     const auto read_ref=[&](Il2CppObject* owner,FieldInfo* field,Il2CppClass* expected,std::unique_ptr<Impl::Root>& root)->bool {
         if(!p.is_a(owner,p.field_parent(field))){error="Unexpected diagnostic field owner";return false;}
         Il2CppObject* raw=nullptr;p.field_value(owner,field,&raw);
@@ -297,7 +324,7 @@ PlayerReadStatus PlayerStateReader::read_upgrade_context(UpgradeContextSnapshot&
         if(raw && (!root->get() || !p.is_a(root->get(),expected))){error="Unable to root expected diagnostic reference";return false;}
         return true;
     };
-    UpgradeContextSnapshot result;std::unique_ptr<Impl::Root> page;
+    UpgradeContextSnapshot result;result.choice_selection_observed=observe_selection;std::unique_ptr<Impl::Root> page;
     status=find_one(page_class,page,result.level_up_page_count);if(status!=PlayerReadStatus::Captured)return status;
     std::unique_ptr<Impl::Root> group,group_items;
     if(!read_ref(page->get(),group_field,group_class,group))return PlayerReadStatus::Error;
@@ -315,6 +342,28 @@ PlayerReadStatus PlayerStateReader::read_upgrade_context(UpgradeContextSnapshot&
                 Impl::Root item(p,raw);
                 if(raw && !p.is_a(item.get(),transform_class))return fail("Unable to root expected choice container reference");
                 result.choice_group_item_references.push_back(item.get()!=nullptr);
+                if(observe_selection) {
+                    std::uint8_t alive=0,active=0;
+                    if(item.get()) {
+                        void* args[]={item.get()};auto boxed_alive=p.invoke(object_alive,nullptr,args,error);
+                        if(!error.empty()){error="Unity object truthiness observation: "+error;return PlayerReadStatus::Error;}
+                        if(!p.value(boxed_alive,p.boolclass,alive,error))return PlayerReadStatus::Error;
+                        if(alive>1)return fail("Invalid Unity object truthiness Boolean");
+                        if(alive) {
+                            auto raw_game_object=p.invoke(component_game_object,item.get(),nullptr,error);
+                            if(!error.empty()){error="Choice container GameObject observation: "+error;return PlayerReadStatus::Error;}
+                            Impl::Root game_object(p,raw_game_object);
+                            if(!p.is_a(game_object.get(),game_object_class))return fail("Unable to root live choice container GameObject");
+                            auto boxed_active=p.invoke(active_in_hierarchy,game_object.get(),nullptr,error);
+                            if(!error.empty()){error="Choice container active-state observation: "+error;return PlayerReadStatus::Error;}
+                            if(!p.value(boxed_active,p.boolclass,active,error))return PlayerReadStatus::Error;
+                            if(active>1)return fail("Invalid choice container active-state Boolean");
+                        }
+                    }
+                    result.choice_group_item_unity_alive.push_back(alive!=0);
+                    result.choice_group_item_active.push_back(active!=0);
+                    if(active && result.selected_choice_container_slot<0)result.selected_choice_container_slot=i;
+                }
             }
         }
     }

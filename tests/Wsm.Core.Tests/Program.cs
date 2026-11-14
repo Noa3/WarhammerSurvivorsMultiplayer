@@ -6,7 +6,8 @@ if (args is ["--reward-capacity"]) { await RewardCapacityRegression.Run(); retur
 if (args is ["--keepalive-context"]) { await BlockedContextRegression.Run(); return; }
 if (args is ["--keepalive-idle"]) { await KeepaliveRegression.Idle(); return; }
 if (args is ["--keepalive"]) { await KeepaliveRegression.Run(); return; }
-if (args.Length != 0) throw new ArgumentException("Supported filters: --send-context, --reward-capacity, --keepalive-context, --keepalive-idle, --keepalive");
+if (args is ["--incoming-oversize"]) { await IncomingOversize(); return; }
+if (args.Length != 0) throw new ArgumentException("Supported filters: --send-context, --reward-capacity, --keepalive-context, --keepalive-idle, --keepalive, --incoming-oversize");
 
 var player = Guid.NewGuid();
 var progress = new LocalProgression(player);
@@ -84,12 +85,7 @@ await using (var raw = await OpenRaw(host.Port, timeout.Token))
     Check(await raw.ReadAsync(new byte[1], timeout.Token) == 0, "spoofed owner rejected");
     Check(!host.Commands.TryRead(out _), "spoofed input not delivered");
 }
-await using (var raw = await OpenRaw(host.Port, timeout.Token))
-{
-    var length = new byte[4]; System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(length, 262145);
-    await raw.WriteAsync(length, timeout.Token);
-    Check(await raw.ReadAsync(new byte[1], timeout.Token) == 0, "oversize frame rejected");
-}
+
 await client.DisposeAsync();
 Guid disconnected;
 do { disconnected = await host.Disconnected.ReadAsync(timeout.Token); } while (disconnected != client.PlayerId);
@@ -97,7 +93,7 @@ Check(!host.ConnectedPlayerIds.Contains(client.PlayerId), "disconnect cleanup");
 Console.WriteLine("PASS rules and protocol rejection");
 
 var failures = new List<string>();
-foreach (var (name, test) in new (string, Func<Task>)[] { ("oversize without peers", Oversize), ("malformed host JSON", MalformedHost), ("network failure regressions", NetworkRegression.Run), ("shared enemy health contract", SharedEnemyContract), ("shared encounter and private rewards", EncounterRegression.Run), ("snapshot encounter capacity", SnapshotSafetyRegression.Capacity), ("snapshot tick ordering", SnapshotSafetyRegression.TickOrder), ("team XP and replay", PolicyRegression.TeamXp), ("personal XP collection", PolicyRegression.PersonalXp), ("malformed policy", PolicyRegression.MalformedSettings), ("team partial enqueue retry", PolicyRegression.PartialEnqueue), ("reward capacity atomicity", RewardCapacityRegression.Run), ("keepalive TCP regressions", KeepaliveRegression.Run) })
+foreach (var (name, test) in new (string, Func<Task>)[] { ("oversize incoming frame", IncomingOversize), ("oversize without peers", Oversize), ("malformed host JSON", MalformedHost), ("network failure regressions", NetworkRegression.Run), ("shared enemy health contract", SharedEnemyContract), ("shared encounter and private rewards", EncounterRegression.Run), ("snapshot encounter capacity", SnapshotSafetyRegression.Capacity), ("snapshot tick ordering", SnapshotSafetyRegression.TickOrder), ("team XP and replay", PolicyRegression.TeamXp), ("personal XP collection", PolicyRegression.PersonalXp), ("malformed policy", PolicyRegression.MalformedSettings), ("team partial enqueue retry", PolicyRegression.PartialEnqueue), ("reward capacity atomicity", RewardCapacityRegression.Run), ("keepalive TCP regressions", KeepaliveRegression.Run) })
 {
     try { await test(); Console.WriteLine("PASS " + name); }
     catch (Exception ex) { failures.Add(name + ": " + ex); Console.WriteLine("FAIL " + failures[^1]); }
@@ -109,6 +105,20 @@ static Task SharedEnemyContract()
     var json = System.Text.Json.JsonSerializer.Serialize(new WorldSnapshot(1, []));
     Check(json.Contains("\"Enemies\"", StringComparison.Ordinal), "snapshot must carry shared enemy health state");
     return Task.CompletedTask;
+}
+
+static async Task IncomingOversize()
+{
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+    // A previous rejected peer can still hold a slot after its EOF. A fresh host
+    // makes this a frame-length rejection, not an earlier capacity rejection.
+    await using var host = new SessionHost(new SessionSettings(1, DeathMode.AllDead, 0, BotDifficulty.Normal), "x");
+    host.Start();
+    await using var raw = await OpenRaw(host.Port, timeout.Token);
+    var length = new byte[4]; System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(length, 262145);
+    await raw.WriteAsync(length, timeout.Token);
+    Check(await raw.ReadAsync(new byte[1], timeout.Token) == 0, "oversize frame rejected");
+    Check(host.ConnectedClients == 0 && !host.Commands.TryRead(out _), "oversize peer not admitted");
 }
 
 static async Task Oversize()

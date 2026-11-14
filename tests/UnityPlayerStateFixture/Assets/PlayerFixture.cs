@@ -65,6 +65,22 @@ public sealed class PlayerFixture : MonoBehaviour {
   group.ConfigureItems(new System.Collections.Generic.List<Transform> { null,page.transform,null,page.transform,null,page.transform,null,page.transform });
   Check("upgrade_choice_at_bound",fixture_upgrade(managed,os,18));
   group.ConfigureItems(new System.Collections.Generic.List<Transform>(new Transform[9]));Check("upgrade_choice_over_bound",fixture_upgrade(managed,os,19));page.ConfigureChoiceGroup(null);
+  group.ConfigureItems(new System.Collections.Generic.List<Transform> { null,page.transform });page.ConfigureChoiceGroup(group);
+  Check("upgrade_selection_active",fixture_upgrade(managed,os,20));
+  var inactiveContainer=new GameObject("InactiveContainer");inactiveContainer.SetActive(false);
+  group.ConfigureItems(new System.Collections.Generic.List<Transform> { null,inactiveContainer.transform });
+  Check("upgrade_selection_inactive",fixture_upgrade(managed,os,21));
+  var destroyedContainer=new GameObject("DestroyedContainer");var destroyedTransform=destroyedContainer.transform;
+  group.ConfigureItems(new System.Collections.Generic.List<Transform> { null,destroyedTransform });DestroyImmediate(destroyedContainer);
+  Check("upgrade_selection_destroyed",fixture_upgrade(managed,os,22));
+  group.ConfigureItems(new System.Collections.Generic.List<Transform> { inactiveContainer.transform,page.transform,page.transform });
+  Check("upgrade_selection_first_active",fixture_upgrade(managed,os,23));DestroyImmediate(inactiveContainer);
+  page.ConfigureChoiceGroup(null);Check("upgrade_selection_null_group",fixture_upgrade(managed,os,24));
+  group.ConfigureItems(new System.Collections.Generic.List<Transform> { null,page.transform });page.ConfigureChoiceGroup(group);
+  Check("upgrade_selection_wrong_thread",fixture_upgrade(managed,os+1,25));
+  gm.players[1].input=null;Check("upgrade_selection_late_error",fixture_upgrade(managed,os,26));gm.players[1].input=new Rewired.Player(52);
+  group.ConfigureItems(new System.Collections.Generic.List<Transform>(new Transform[9]));Check("upgrade_selection_over_bound",fixture_upgrade(managed,os,27));
+  gm.running=false;Check("upgrade_selection_stopped",fixture_upgrade(managed,os,28));gm.running=true;page.ConfigureChoiceGroup(null);
   DestroyImmediate(gm.gameObject);Check("upgrade_no_manager",fixture_upgrade(managed,os,12));
  }
 }

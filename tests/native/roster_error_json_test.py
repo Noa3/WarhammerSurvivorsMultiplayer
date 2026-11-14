@@ -38,3 +38,11 @@ errors = [json.loads(s.removeprefix('ROSTER_UPGRADE_ERROR_JSON ')) for s in resu
 assert len(errors) == 1 and errors[0]['upgradeContext'] == {'state': 'error', 'actors': []}
 print('PASS actual native roster JSON error roundtrip: quotes, backslash, newline, tab, and control characters')
 print('PASS actual native upgrade-context JSON: typed booleans, actor identity, null presence, stale-error suppression')
+selections = [json.loads(s.removeprefix('ROSTER_SELECTION_JSON ')) for s in result.stdout.splitlines()
+              if s.startswith('ROSTER_SELECTION_JSON ')]
+assert len(selections) == 1 and selections[0]['action'] == 'upgradeSelection'
+assert selections[0]['upgradeContext']['choiceSelection'] == {
+    'observed': True, 'selectedContainerSlot': 1,
+    'unityAlive': [False, True], 'activeInHierarchy': [False, True],
+}
+print('PASS actual native explicit selection JSON: opt-in action, ordered Unity-reported flags and selected slot')

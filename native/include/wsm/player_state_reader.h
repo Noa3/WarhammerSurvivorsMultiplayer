@@ -24,6 +24,10 @@ struct UpgradeContextSnapshot {
     bool choice_group_present = false, choice_group_items_present = false;
     // Managed reference presence only; neither active state nor Unity native liveness.
     std::vector<bool> choice_group_item_references;
+    bool choice_selection_observed = false;
+    std::vector<bool> choice_group_item_unity_alive, choice_group_item_active;
+    // Diagnostic first Unity-reported live/active entry, not proven stock call-time selection.
+    std::int32_t selected_choice_container_slot = -1;
 };
 enum class PlayerReadStatus { Captured, NotReady, Error };
 // Metadata is borrowed for the runtime lifetime. The expected IDs must be
@@ -40,11 +44,14 @@ public:
     // Explicit diagnostic only. Presence means a managed reference, not Unity native-object liveness.
     // Optional metadata is resolved here, never required by normal initialize/read.
     [[nodiscard]] PlayerReadStatus read_upgrade_context(UpgradeContextSnapshot& output, std::string& error) const;
+    // Separate opt-in query: additionally invokes validated Unity engine observation methods.
+    [[nodiscard]] PlayerReadStatus read_upgrade_selection(UpgradeContextSnapshot& output, std::string& error) const;
 #ifdef WSM_PLAYER_STATE_TESTING
     void test_fail_next_scene_root(bool players);
     void test_use_wrong_equipment_collection();
 #endif
 private:
+    PlayerReadStatus read_upgrade_context_impl(UpgradeContextSnapshot& output, std::string& error, bool observe_selection) const;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
