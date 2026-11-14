@@ -1,6 +1,6 @@
 # Wsm.Lobby
 
-Standalone .NET 10 HTTP/JSON **control plane**, not a game transport or gameplay adapter. Reference `Wsm.Lobby.csproj` from the desktop application; `Microsoft.AspNetCore.App` is a framework reference. No Core dependency.
+Standalone .NET 10 HTTP/JSON lobby service for player selections, readiness and session rules. Reference `Wsm.Lobby.csproj` from the desktop application; `Microsoft.AspNetCore.App` is a framework reference. Gameplay transport and a game adapter must be supplied separately.
 
 ## API
 
@@ -44,6 +44,6 @@ All humans must be ready with loadouts before `TryStart`. With no `IGameLaunchCo
 
 ## Verification
 
-`dotnet run --project tests/Wsm.Lobby.Tests/Wsm.Lobby.Tests.csproj` runs the self-contained executable integration tests against real loopback Kestrel; it uses no third-party test framework.
+`dotnet run --project tests/Wsm.Lobby.Tests/Wsm.Lobby.Tests.csproj` runs the executable integration tests against loopback Kestrel.
 
 The client bounds buffered HTTP responses, including errors, to 32 KiB. Readiness requests require an explicit boolean. Regression tests include an oversized valid response from a controlled server, malformed readiness preserving the current state, and heartbeats during a fixture launch held beyond the normal expiry interval. These are control-plane tests, not a real game launch.

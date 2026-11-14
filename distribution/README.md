@@ -22,7 +22,7 @@ Example from the repository root:
 .\distribution\win-x64\launcher\Wsm.Launcher.exe inspect "G:\SteamLibrary\steamapps\common\Warhammer Survivors"
 ```
 
-`inspect` reads installation metadata; it does not start a game. Running a game probe is a different operation: read the root README's save/Steam Cloud warning first. No original game assets, game assemblies, generated interop, saves or private working documents are packaged here.
+`inspect` reads installation metadata without starting a game. Before running a game probe, read the [save and Steam Cloud precautions](../docs/DEVELOPMENT.md#game-probes-and-save-data).
 
 ## Integrity and rebuilding
 
@@ -34,6 +34,6 @@ With the source build prerequisites installed, create a new package using:
 pwsh -File tools/package.ps1 -OutputDirectory artifacts/package-new
 ```
 
-The packaging script refuses an existing output directory rather than overwriting user files. Without `-OutputDirectory`, it targets `distribution/win-x64`, which is already present in a normal checkout. Intermediate build outputs are ignored; this curated package is intentionally tracked in Git.
+The packaging script refuses an existing output directory rather than overwriting user files. Without `-OutputDirectory`, it targets `distribution/win-x64`, which is already present in a normal checkout. Choose a new destination for each build.
 
-Local validation included the canonical source build/tests, launching the packaged GUI with its bundled `coreclr.dll`, graceful GUI shutdown, and executing the packaged launcher's installation inspection. These checks do not establish gameplay, cross-machine connectivity or a successful multiplayer run.
+See the [developer guide](../docs/DEVELOPMENT.md#build-and-test) for build requirements and automated checks.
