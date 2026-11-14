@@ -61,6 +61,9 @@ extern "C" __declspec(dllexport) int __cdecl fixture_upgrade(int managed, unsign
     snapshot.choice_group_item_unity_alive={true,false};snapshot.choice_group_item_active={false,true};
     snapshot.choice_items_observed=true;snapshot.choice_child_count=77;
     snapshot.choice_items={{true,false,true,false,true,false,true,-99}};
+    snapshot.fourth_option_hint_observed=true;snapshot.fourth_option_hint_present=true;
+    snapshot.fourth_option_hint_unity_alive=true;snapshot.fourth_option_hint_comparison_complete=true;
+    snapshot.fourth_option_hint_child_slot=77;
     const auto before=snapshot;
     const auto unchanged=[&] {
         if(snapshot.level_up_page_count!=before.level_up_page_count ||
@@ -73,7 +76,12 @@ extern "C" __declspec(dllexport) int __cdecl fixture_upgrade(int managed, unsign
            snapshot.choice_selection_observed!=before.choice_selection_observed || snapshot.selected_choice_container_slot!=before.selected_choice_container_slot ||
            snapshot.choice_group_item_unity_alive!=before.choice_group_item_unity_alive || snapshot.choice_group_item_active!=before.choice_group_item_active ||
            snapshot.choice_items_observed!=before.choice_items_observed || snapshot.choice_child_count!=before.choice_child_count ||
-           snapshot.choice_items.size()!=before.choice_items.size())return false;
+           snapshot.choice_items.size()!=before.choice_items.size() ||
+           snapshot.fourth_option_hint_observed!=before.fourth_option_hint_observed ||
+           snapshot.fourth_option_hint_present!=before.fourth_option_hint_present ||
+           snapshot.fourth_option_hint_unity_alive!=before.fourth_option_hint_unity_alive ||
+           snapshot.fourth_option_hint_comparison_complete!=before.fourth_option_hint_comparison_complete ||
+           snapshot.fourth_option_hint_child_slot!=before.fourth_option_hint_child_slot)return false;
         for(std::size_t i=0;i<before.choice_items.size();++i) {
             const auto &a=snapshot.choice_items[i], &b=before.choice_items[i];
             if(a.child_present!=b.child_present || a.child_unity_alive!=b.child_unity_alive ||
@@ -88,16 +96,16 @@ extern "C" __declspec(dllexport) int __cdecl fixture_upgrade(int managed, unsign
         }
         return true;
     };
-    auto status=mode>=29?reader.read_upgrade_items(snapshot,error):mode>=20?reader.read_upgrade_selection(snapshot,error):reader.read_upgrade_context(snapshot,error);
-    if(mode==1 || mode==9 || mode==12 || mode==28 || mode==36) {
+    auto status=mode>=40?reader.read_upgrade_hint(snapshot,error):mode>=29?reader.read_upgrade_items(snapshot,error):mode>=20?reader.read_upgrade_selection(snapshot,error):reader.read_upgrade_context(snapshot,error);
+    if(mode==1 || mode==9 || mode==12 || mode==28 || mode==36 || mode==47) {
         if(status==wsm::PlayerReadStatus::NotReady && error.empty() && unchanged())return 0;
         note("upgrade_not_ready",error,static_cast<int>(status)); return 22;
     }
-    if(mode==7 || mode==8 || mode==10 || mode==11 || mode==13 || mode==14 || mode==19 || mode==25 || mode==26 || mode==27 || mode==33 || mode==34 || mode==35) {
+    if(mode==7 || mode==8 || mode==10 || mode==11 || mode==13 || mode==14 || mode==19 || mode==25 || mode==26 || mode==27 || mode==33 || mode==34 || mode==35 || mode==45 || mode==46 || mode==48) {
         if(status==wsm::PlayerReadStatus::Error && !error.empty() && unchanged() &&
            (mode!=14 || error=="ActiveEquipment must be List of canonical Equipment") &&
            ((mode!=19 && mode!=27) || error=="Choice container item count outside supported bound") &&
-           (mode!=33 || error=="Choice child count outside supported bound"))return 0;
+           ((mode!=33 && mode!=48) || error=="Choice child count outside supported bound"))return 0;
         note("upgrade_error",error,static_cast<int>(status)); return 23;
     }
     if(status!=wsm::PlayerReadStatus::Captured || !error.empty()) { note("upgrade_capture",error,static_cast<int>(status)); return 24; }
@@ -107,7 +115,8 @@ extern "C" __declspec(dllexport) int __cdecl fixture_upgrade(int managed, unsign
        snapshot.active_character_present!=active || snapshot.level_up_factory_present!=factory ||
        snapshot.active_character_slot!=slot || snapshot.actors.size()!=2) { note("upgrade_context_values",error,25); return 25; }
     const auto &a=snapshot.actors[0], &b=snapshot.actors[1];
-    const bool item_group=mode==29||mode==31||mode==32||mode==37||mode==38||mode==39;
+    const bool four_children=mode==29||(mode>=40 && mode<=43);
+    const bool item_group=four_children||mode==31||mode==32||mode==37||mode==38||mode==39||mode==49;
     const bool group_present=(mode>=15 && mode<=18)||(mode>=20 && mode<=23)||item_group, items_present=group_present && mode!=16;
     const auto entries=(mode==15||(mode>=20 && mode<=22))?std::vector<bool>{false,true}:mode==18?std::vector<bool>{false,true,false,true,false,true,false,true}:mode==23?std::vector<bool>{true,true,true}:mode==37?std::vector<bool>{true,true}:item_group?std::vector<bool>{true}:std::vector<bool>{};
     if(snapshot.choice_group_present!=group_present || snapshot.choice_group_items_present!=items_present || snapshot.choice_group_item_references!=entries) {
@@ -120,14 +129,14 @@ extern "C" __declspec(dllexport) int __cdecl fixture_upgrade(int managed, unsign
         note("upgrade_choice_selection_values",error,28);return 28;
     }
     if(item_group) {
-        const int expected_count=mode==29?4:mode==31?0:mode==32?32:1;
+        const int expected_count=four_children?4:(mode==31||mode==49)?0:mode==32?32:1;
         if(!snapshot.choice_items_observed || snapshot.choice_child_count!=expected_count || snapshot.choice_items.size()!=static_cast<std::size_t>(expected_count)) {
             note("upgrade_choice_item_count",error,29);return 29;
         }
         for(std::size_t i=0;i<snapshot.choice_items.size();++i) {
-            const auto& item=snapshot.choice_items[i];const bool component=mode==29?i!=0:mode==37;
-            const int type=mode==29?(i==2?7001:i==3?7002:0):mode==37?7001:0;
-            const bool data=mode==29?i==2:mode==37;
+            const auto& item=snapshot.choice_items[i];const bool component=four_children?(i!=0 && !(mode>=40 && i==3)):mode==37;
+            const int type=four_children?(i==2?7001:(i==3 && mode<40)?7002:0):mode==37?7001:0;
+            const bool data=four_children?i==2:mode==37;
             if(!item.child_present || !item.child_unity_alive || item.component_present!=component ||
                item.component_unity_alive!=component || item.fields_observed!=component ||
                item.data_present!=data || item.is_new!=data || item.weapon_type!=type) {
@@ -136,6 +145,12 @@ extern "C" __declspec(dllexport) int __cdecl fixture_upgrade(int managed, unsign
         }
     } else if(snapshot.choice_items_observed || snapshot.choice_child_count!=-1 || !snapshot.choice_items.empty()) {
         note("upgrade_items_must_be_opt_in",error,31);return 31;
+    }
+    const bool hint_present=mode==40||mode==42||mode==43||mode==44||mode==49;
+    if(snapshot.fourth_option_hint_observed!=(mode>=40) || snapshot.fourth_option_hint_present!=hint_present ||
+       snapshot.fourth_option_hint_unity_alive!=(hint_present && mode!=43) || snapshot.fourth_option_hint_comparison_complete!=(mode>=40 && item_group) ||
+       snapshot.fourth_option_hint_child_slot!=(mode==40?3:-1)) {
+        note("upgrade_hint_identity_values",error,32);return 32;
     }
     if(a.slot!=0 || a.input_id!=41 || a.character_type!=3 || !a.weapons_manager_present || a.accessories_manager_present || a.accessories_collection_present ||
        b.slot!=1 || b.input_id!=52 || b.character_type!=4 || b.weapons_manager_present || !b.accessories_manager_present || b.accessories_collection_present!=(mode!=5)) {

@@ -36,6 +36,8 @@ namespace Wilson.UI
         [Preserve] private VampireSurvivors.Framework.GameSessionData _gameSession;
         [Preserve] private VampireSurvivors.Framework.LevelUpFactory _levelUpFactory;
         [Preserve] private UIGroup<Transform> _ChoiceContainerGroup;
+        [Preserve] private GameObject _FourthOptionHint;
+        public void ConfigureHint(GameObject hint) { _FourthOptionHint = hint; }
         public void ConfigureChoiceGroup(UIGroup<Transform> group) { _ChoiceContainerGroup = group; }
         public void Configure(VampireSurvivors.Framework.GameSessionData session,
                               VampireSurvivors.Framework.LevelUpFactory factory)

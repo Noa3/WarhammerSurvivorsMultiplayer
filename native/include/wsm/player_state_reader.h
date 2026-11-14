@@ -38,6 +38,9 @@ struct UpgradeContextSnapshot {
     bool choice_items_observed = false;
     std::int32_t choice_child_count = -1;
     std::vector<UpgradeChoiceItemSnapshot> choice_items;
+    bool fourth_option_hint_observed = false, fourth_option_hint_present = false;
+    bool fourth_option_hint_unity_alive = false, fourth_option_hint_comparison_complete = false;
+    std::int32_t fourth_option_hint_child_slot = -1;
 };
 enum class PlayerReadStatus { Captured, NotReady, Error };
 // Metadata is borrowed for the runtime lifetime. The expected IDs must be
@@ -58,12 +61,14 @@ public:
     [[nodiscard]] PlayerReadStatus read_upgrade_selection(UpgradeContextSnapshot& output, std::string& error) const;
     // Separate opt-in query: at most 32 direct children of the selected container.
     [[nodiscard]] PlayerReadStatus read_upgrade_items(UpgradeContextSnapshot& output, std::string& error) const;
+    // Separate opt-in query: compare the page hint with the same bounded child GameObjects.
+    [[nodiscard]] PlayerReadStatus read_upgrade_hint(UpgradeContextSnapshot& output, std::string& error) const;
 #ifdef WSM_PLAYER_STATE_TESTING
     void test_fail_next_scene_root(bool players);
     void test_use_wrong_equipment_collection();
 #endif
 private:
-    PlayerReadStatus read_upgrade_context_impl(UpgradeContextSnapshot& output, std::string& error, bool observe_selection, bool observe_items) const;
+    PlayerReadStatus read_upgrade_context_impl(UpgradeContextSnapshot& output, std::string& error, bool observe_selection, bool observe_items, bool observe_hint) const;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

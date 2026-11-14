@@ -62,3 +62,12 @@ assert items[0]['upgradeContext']['choiceItems'] == {
     ],
 }
 print('PASS actual native item JSON: explicit query, ordered component/data flags and typed enum values')
+hints = [json.loads(s.removeprefix('ROSTER_HINT_JSON ')) for s in result.stdout.splitlines()
+         if s.startswith('ROSTER_HINT_JSON ')]
+assert len(hints) == 1 and hints[0]['action'] == 'upgradeHint'
+assert hints[0]['upgradeContext']['choiceItems'] == items[0]['upgradeContext']['choiceItems']
+assert hints[0]['upgradeContext']['fourthOptionHint'] == {
+    'observed': True, 'referencePresent': True, 'unityAlive': True,
+    'childComparisonComplete': True, 'childSlot': 1,
+}
+print('PASS actual native hint JSON: explicit query, typed reference/liveness/comparison flags and child slot')

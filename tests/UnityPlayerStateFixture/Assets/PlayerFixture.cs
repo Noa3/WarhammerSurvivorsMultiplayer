@@ -90,6 +90,25 @@ public sealed class PlayerFixture : MonoBehaviour {
   }
   group.ConfigureItems(new System.Collections.Generic.List<Transform> { itemContainer.transform });page.ConfigureChoiceGroup(group);
   Check("upgrade_items_ordered_fields",fixture_upgrade(managed,os,29));
+  page.ConfigureHint(itemContainer.transform.GetChild(3).gameObject);
+  DestroyImmediate(itemContainer.transform.GetChild(3).GetComponent<Wilson.UI.WSLevelUpItemUI>());
+  Check("upgrade_hint_fourth_child",fixture_upgrade(managed,os,40));page.ConfigureHint(null);
+  Check("upgrade_hint_null",fixture_upgrade(managed,os,41));
+  var foreignHint=new GameObject("ForeignHint");page.ConfigureHint(foreignHint);
+  Check("upgrade_hint_foreign",fixture_upgrade(managed,os,42));DestroyImmediate(foreignHint);
+  Check("upgrade_hint_destroyed",fixture_upgrade(managed,os,43));
+  foreignHint=new GameObject("LiveForeignHint");page.ConfigureHint(foreignHint);page.ConfigureChoiceGroup(null);
+  Check("upgrade_hint_no_selection",fixture_upgrade(managed,os,44));page.ConfigureChoiceGroup(group);
+  page.ConfigureHint(itemContainer.transform.GetChild(3).gameObject);
+  Check("upgrade_hint_wrong_thread",fixture_upgrade(managed,os+1,45));
+  gm.players[1].input=null;Check("upgrade_hint_late_error",fixture_upgrade(managed,os,46));gm.players[1].input=new Rewired.Player(52);
+  gm.running=false;Check("upgrade_hint_stopped",fixture_upgrade(managed,os,47));gm.running=true;
+  var emptyHintContainer=new GameObject("EmptyHintContainer");
+  group.ConfigureItems(new System.Collections.Generic.List<Transform> { emptyHintContainer.transform });page.ConfigureHint(foreignHint);
+  Check("upgrade_hint_empty_selected",fixture_upgrade(managed,os,49));DestroyImmediate(emptyHintContainer);
+  group.ConfigureItems(new System.Collections.Generic.List<Transform> { itemContainer.transform });
+  for(int i=4;i<33;++i)new GameObject("HintBoundChild"+i).transform.SetParent(itemContainer.transform,false);
+  Check("upgrade_hint_over_bound",fixture_upgrade(managed,os,48));DestroyImmediate(foreignHint);page.ConfigureHint(null);
   DestroyImmediate(itemContainer);page.ConfigureChoiceGroup(null);
   Check("upgrade_items_null_group",fixture_upgrade(managed,os,30));
   var boundedContainer=new GameObject("BoundedItemContainer");

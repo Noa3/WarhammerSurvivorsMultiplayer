@@ -160,6 +160,16 @@ all item fields and the ordered vector; ordinary successful queries must reset
 these opt-in observations to their defaults. Missing applicable card data is an
 observed candidate, not a manufactured exception or a gameplay fix.
 
+The explicit `read_upgrade_hint` tests separately compare the private page
+GameObject reference with the same bounded children. The positive hint fixture
+matches the fourth child after removing that child's item component. Additional
+cases distinguish null, live foreign and destroyed hint references, no selected
+container versus an empty selected container, guarded wrong-thread/stopped-run
+refusal, late-error atomicity and overlarge child lists. Successful older queries
+must reset all hint flags and the slot to unrequested defaults; errors preserve
+the full deliberately populated snapshot. Hint presence, Unity liveness and
+complete child comparison are separate facts, not a cause or throw-time proof.
+
 The reader trusts the inspected runtime's provenance. It resolves named contracts
 and checks important class/image identities, but is not an admission boundary for
 hostile metadata or arbitrary foreign assemblies with colliding type names.

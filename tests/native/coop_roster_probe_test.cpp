@@ -27,6 +27,12 @@ int main(int argc, char** argv) {
     check("own PID explicit item query",parse_command("upgradeItems:1234",1234,item_command) && item_command.player==-1);
     check("wrong PID explicit item query",!parse_command("upgradeItems:1235",1234,item_command));
     check("item query cannot enter mutation dispatch",item_command.action==RosterAction::upgrade_items && !mutates_roster(item_command.action));
+    RosterCommand hint_command;
+    check("own PID explicit hint query",parse_command("upgradeHint:1234",1234,hint_command) && hint_command.action==RosterAction::upgrade_hint);
+    check("wrong PID explicit hint query",!parse_command("upgradeHint:1235",1234,hint_command));
+    check("hint query cannot enter mutation dispatch",!mutates_roster(RosterAction::upgrade_hint));
+    for(const auto* text:{"upgradeHint:","upgradeHint:-1234","upgradeHint:1234:0","upgradeHint:1234\nrollback:1234"})
+        check(text,!parse_command(text,1234,hint_command));
     for(const auto* text:{"upgradeItems:","upgradeItems:-1234","upgradeItems:1234:0","upgradeItems:1234\nrollback:1234"})
         check(text,!parse_command(text,1234,item_command));
     for(const auto* text:{"upgradeSelection:","upgradeSelection:-1234","upgradeSelection:1234:0","upgradeSelection:1234\nrollback:1234"})
@@ -107,6 +113,24 @@ int main(int argc, char** argv) {
         check("less detailed query never exposes stale item observations",items_json.find("\"choiceItems\"")==std::string::npos);
     }
     const auto directory = std::filesystem::path(argv[1]) / ("roster-command-" + std::to_string(GetCurrentProcessId()));
+    c.command={RosterAction::upgrade_hint,-1};c.upgrade_status=PlayerReadStatus::Captured;
+    c.upgrade.fourth_option_hint_observed=true;c.upgrade.fourth_option_hint_present=true;
+    c.upgrade.fourth_option_hint_unity_alive=true;c.upgrade.fourth_option_hint_comparison_complete=true;
+    c.upgrade.fourth_option_hint_child_slot=1;
+    auto hint_json=result_json(c,16);
+    check("hint query serializes explicit action and identity",hint_json.find("\"action\":\"upgradeHint\"")!=std::string::npos &&
+          hint_json.find("\"fourthOptionHint\":{\"observed\":true,\"referencePresent\":true,\"unityAlive\":true,\"childComparisonComplete\":true,\"childSlot\":1}")!=std::string::npos);
+    std::cout << "ROSTER_HINT_JSON " << hint_json << '\n';
+    c.upgrade_status=PlayerReadStatus::Error;hint_json=result_json(c,17);
+    check("hint error suppresses all stale observations",hint_json.find("\"fourthOptionHint\"")==std::string::npos &&
+          hint_json.find("\"upgradeContext\":{\"state\":\"error\",\"actors\":[]}")!=std::string::npos);
+    c.upgrade_status=PlayerReadStatus::NotReady;hint_json=result_json(c,18);
+    check("hint not ready suppresses all stale observations",hint_json.find("\"fourthOptionHint\"")==std::string::npos &&
+          hint_json.find("\"upgradeContext\":{\"state\":\"not_ready\",\"actors\":[]}")!=std::string::npos);
+    for(auto action:{RosterAction::upgrade_context,RosterAction::upgrade_selection,RosterAction::upgrade_items}) {
+        c.command={action,-1};c.upgrade_status=PlayerReadStatus::Captured;hint_json=result_json(c,19);
+        check("less detailed query never exposes stale hint observation",hint_json.find("\"fourthOptionHint\"")==std::string::npos);
+    }
     if (!std::filesystem::create_directory(directory)) return 2;
     try {
         const auto request = directory / "request";

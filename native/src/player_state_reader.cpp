@@ -191,15 +191,18 @@ PlayerReadStatus PlayerStateReader::read(SceneStateSnapshot& output,std::string&
 }
 
 PlayerReadStatus PlayerStateReader::read_upgrade_context(UpgradeContextSnapshot& output,std::string& error) const {
-    return read_upgrade_context_impl(output,error,false,false);
+    return read_upgrade_context_impl(output,error,false,false,false);
 }
 PlayerReadStatus PlayerStateReader::read_upgrade_selection(UpgradeContextSnapshot& output,std::string& error) const {
-    return read_upgrade_context_impl(output,error,true,false);
+    return read_upgrade_context_impl(output,error,true,false,false);
 }
 PlayerReadStatus PlayerStateReader::read_upgrade_items(UpgradeContextSnapshot& output,std::string& error) const {
-    return read_upgrade_context_impl(output,error,true,true);
+    return read_upgrade_context_impl(output,error,true,true,false);
 }
-PlayerReadStatus PlayerStateReader::read_upgrade_context_impl(UpgradeContextSnapshot& output,std::string& error,bool observe_selection,bool observe_items) const {
+PlayerReadStatus PlayerStateReader::read_upgrade_hint(UpgradeContextSnapshot& output,std::string& error) const {
+    return read_upgrade_context_impl(output,error,true,true,true);
+}
+PlayerReadStatus PlayerStateReader::read_upgrade_context_impl(UpgradeContextSnapshot& output,std::string& error,bool observe_selection,bool observe_items,bool observe_hint) const {
     error.clear();
     if(!impl_){error="Reader not initialized";return PlayerReadStatus::Error;}
     const auto& p=*impl_;
@@ -372,6 +375,12 @@ PlayerReadStatus PlayerStateReader::read_upgrade_context_impl(UpgradeContextSnap
         item_type=std::make_unique<Impl::Root>(p,raw_type);
         if(!p.is_a(item_type->get(),system_type))return fail("Unable to root canonical upgrade item reflection type");
     }
+    FieldInfo* hint_field=nullptr;
+    if(observe_hint) {
+        hint_field=reference_field(page_class,"_FourthOptionHint",game_object_class);
+        if(!hint_field || (p.field_flags(hint_field)&7)!=1 || !p.type(p.field_type(hint_field),"UnityEngine.GameObject"))
+            return fail("Invalid canonical fourth-option hint field metadata");
+    }
     const auto read_ref=[&](Il2CppObject* owner,FieldInfo* field,Il2CppClass* expected,std::unique_ptr<Impl::Root>& root)->bool {
         if(!p.is_a(owner,p.field_parent(field))){error="Unexpected diagnostic field owner";return false;}
         Il2CppObject* raw=nullptr;p.field_value(owner,field,&raw);
@@ -381,6 +390,18 @@ PlayerReadStatus PlayerStateReader::read_upgrade_context_impl(UpgradeContextSnap
     };
     UpgradeContextSnapshot result;result.choice_selection_observed=observe_selection;std::unique_ptr<Impl::Root> page;
     status=find_one(page_class,page,result.level_up_page_count);if(status!=PlayerReadStatus::Captured)return status;
+    std::unique_ptr<Impl::Root> hint;
+    if(observe_hint) {
+        if(!read_ref(page->get(),hint_field,game_object_class,hint))return PlayerReadStatus::Error;
+        result.fourth_option_hint_observed=true;result.fourth_option_hint_present=hint->get()!=nullptr;
+        if(hint->get()) {
+            std::uint8_t alive=0;void* args[]={hint->get()};auto boxed=p.invoke(object_alive,nullptr,args,error);
+            if(!error.empty()){error="Fourth-option hint liveness observation: "+error;return PlayerReadStatus::Error;}
+            if(!p.value(boxed,p.boolclass,alive,error))return PlayerReadStatus::Error;
+            if(alive>1)return fail("Invalid fourth-option hint liveness Boolean");
+            result.fourth_option_hint_unity_alive=alive!=0;
+        }
+    }
     std::unique_ptr<Impl::Root> group,group_items,selected_container;
     if(!read_ref(page->get(),group_field,group_class,group))return PlayerReadStatus::Error;
     result.choice_group_present=group->get()!=nullptr;
@@ -440,6 +461,7 @@ PlayerReadStatus PlayerStateReader::read_upgrade_context_impl(UpgradeContextSnap
         std::int32_t size=0;
         if(!check_count(size))return PlayerReadStatus::Error;
         result.choice_items_observed=true;result.choice_child_count=size;
+        result.fourth_option_hint_comparison_complete=observe_hint;
         for(std::int32_t i=0;i<size;++i) {
             std::int32_t current=0;
             if(!check_count(current))return PlayerReadStatus::Error;
@@ -456,6 +478,16 @@ PlayerReadStatus PlayerStateReader::read_upgrade_context_impl(UpgradeContextSnap
                 if(alive>1)return fail("Invalid choice child liveness Boolean");
                 row.child_unity_alive=alive!=0;
                 if(alive) {
+                    if(observe_hint) {
+                        auto raw_object=p.invoke(component_game_object,child.get(),nullptr,error);
+                        if(!error.empty()){error="Choice child GameObject identity observation: "+error;return PlayerReadStatus::Error;}
+                        Impl::Root game_object(p,raw_object);
+                        if(!p.is_a(game_object.get(),game_object_class))return fail("Unable to root choice child GameObject identity");
+                        if(hint->get() && game_object.get()==hint->get()) {
+                            if(result.fourth_option_hint_child_slot>=0)return fail("Fourth-option hint matched more than one observed child slot");
+                            result.fourth_option_hint_child_slot=i;
+                        }
+                    }
                     if(!item_type->get())return fail("Lost upgrade item reflection type root");
                     void* type_arg[]={item_type->get()};
                     auto raw_component=p.invoke(get_component,child.get(),type_arg,error);
@@ -480,6 +512,7 @@ PlayerReadStatus PlayerStateReader::read_upgrade_context_impl(UpgradeContextSnap
                     }
                 }
             }
+            if(observe_hint && !row.child_unity_alive)result.fourth_option_hint_comparison_complete=false;
             result.choice_items.push_back(row);
         }
         std::int32_t final_count=0;

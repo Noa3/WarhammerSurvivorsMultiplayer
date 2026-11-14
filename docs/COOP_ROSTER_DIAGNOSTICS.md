@@ -56,6 +56,7 @@ stop the diagnostic loop.
 | `upgradeContext:<pid>` | Explicit read-only upgrade-context query in an existing run; never enters roster mutation dispatch. |
 | `upgradeSelection:<pid>` | Separate opt-in context query with bounded Unity-reported container liveness and hierarchy activity. |
 | `upgradeItems:<pid>` | Separate opt-in query for at most 32 direct children and their item-component/data observations in the diagnostic selected container. |
+| `upgradeHint:<pid>` | Separate opt-in item query that compares the page's fourth-option hint with the same direct-child GameObjects. |
 | `enroll:<pid>:<id>` | Add one existing configured player to the exact one-player baseline. |
 | `select:<pid>:<id>` | Select an enrolled menu player, not a hero; no exclusive input control or vibration. |
 | `copy:<pid>:<id>` | Copy the stock menu's currently bought character into that player's existing selection entry. |
@@ -81,7 +82,7 @@ native asset or correct behavior. Getter names do not establish purity.
 ### Explicit upgrade-context query
 
 `upgradeContext:<pid>` invokes the structural context reader. Apart from the
-separate selection/item queries below, ordinary commands report
+separate selection/item/hint queries below, ordinary commands report
 `upgradeContext.state` as `not_requested`; optional Wilson/equipment metadata
 is not required by normal reader initialization or observation. The new query
 still counts toward the same eight-request budget and uses the verified main
@@ -226,6 +227,44 @@ reached Level 2 alive with equal XP. The empty selection and
 post-exception state but does not prove the fourth child is invalid, identify
 the original generic argument/throw operand, or justify removing, replacing or
 adding a component. The owned game and controller both exited normally.
+
+### Explicit fourth-option hint identity
+
+`upgradeHint:<pid>` adds one separately requested comparison to the item query.
+It validates the directly declared private instance
+`WSLevelUpPage._FourthOptionHint: UnityEngine.GameObject` through metadata, roots
+that reference, and observes its Unity truthiness. Each live direct child's
+GameObject is obtained through the existing canonical `Component.get_gameObject`
+binding and compared by managed object identity. Ordinary structural, selection
+and item-only queries neither resolve this additional field nor call the extra
+child identity getters.
+
+`upgradeContext.fourthOptionHint` contains `observed`, `referencePresent`,
+`unityAlive`, `childComparisonComplete` and `childSlot`. A slot of `-1` means no
+observed match, not necessarily a complete negative: no selected container or an
+unavailable/dead child leaves the comparison incomplete. A selected empty
+container has a complete zero-child comparison. Presence, liveness and identity
+are separate observations. More than one observed matching slot, invalid
+metadata/types/roots, invocation errors or the existing count guards refuse the
+whole capture. Error/NotReady and less detailed queries suppress hint output.
+
+A match identifies only the post-exception objects observed by this query. It
+does not establish the original generic argument, call-time operands, native
+getter purity or a gameplay cause. No hint is moved, removed or modified.
+
+In a separate target-game 2.1.6 first-failed-upgrade capture, this query reported
+`observed: true`, `referencePresent: true`, `unityAlive: true`,
+`childComparisonComplete: true` and `childSlot: 3`. The diagnostic selected
+container was slot 2 with exactly four live direct Transform children. The
+first three had live item components and present data, with observed weapon
+types `[5016, 5072, 5012]`; the fourth had no managed item component. This proves
+that, in this post-exception snapshot, the component-less fourth child is the
+same page's hint GameObject, not a fourth card. Both actual heroes `[5012, 5001]`
+were alive at Level 2 with equal XP; the preceding ordinary Level-1 pause
+reported `not_ready`. The empty upgrade page and `CanCharacterReceivePass`
+exception persisted. The owned game and controller exited normally. No hint
+state/parent change, component substitution or page operation was attempted;
+the original generic argument and throwing operand remain unmeasured.
 
 ## Mutation boundaries
 
