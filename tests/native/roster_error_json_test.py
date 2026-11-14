@@ -46,3 +46,19 @@ assert selections[0]['upgradeContext']['choiceSelection'] == {
     'unityAlive': [False, True], 'activeInHierarchy': [False, True],
 }
 print('PASS actual native explicit selection JSON: opt-in action, ordered Unity-reported flags and selected slot')
+items = [json.loads(s.removeprefix('ROSTER_ITEMS_JSON ')) for s in result.stdout.splitlines()
+         if s.startswith('ROSTER_ITEMS_JSON ')]
+assert len(items) == 1 and items[0]['action'] == 'upgradeItems'
+assert items[0]['upgradeContext']['choiceSelection'] == selections[0]['upgradeContext']['choiceSelection']
+assert items[0]['upgradeContext']['choiceItems'] == {
+    'observed': True, 'childCount': 2,
+    'items': [
+        {'childReferencePresent': True, 'childUnityAlive': True,
+         'componentReferencePresent': False, 'componentUnityAlive': False,
+         'fieldsObserved': False, 'weaponType': 0, 'dataReferencePresent': False, 'isNew': False},
+        {'childReferencePresent': True, 'childUnityAlive': True,
+         'componentReferencePresent': True, 'componentUnityAlive': True,
+         'fieldsObserved': True, 'weaponType': 7002, 'dataReferencePresent': False, 'isNew': True},
+    ],
+}
+print('PASS actual native item JSON: explicit query, ordered component/data flags and typed enum values')

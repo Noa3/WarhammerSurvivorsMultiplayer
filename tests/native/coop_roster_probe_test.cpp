@@ -23,6 +23,12 @@ int main(int argc, char** argv) {
     check("own PID explicit selection query", parse_command("upgradeSelection:1234",1234,command) && command.action==RosterAction::upgrade_selection && command.player==-1);
     check("wrong PID explicit selection query", !parse_command("upgradeSelection:1235",1234,command));
     check("selection query cannot enter mutation dispatch", !mutates_roster(RosterAction::upgrade_selection));
+    RosterCommand item_command;
+    check("own PID explicit item query",parse_command("upgradeItems:1234",1234,item_command) && item_command.player==-1);
+    check("wrong PID explicit item query",!parse_command("upgradeItems:1235",1234,item_command));
+    check("item query cannot enter mutation dispatch",item_command.action==RosterAction::upgrade_items && !mutates_roster(item_command.action));
+    for(const auto* text:{"upgradeItems:","upgradeItems:-1234","upgradeItems:1234:0","upgradeItems:1234\nrollback:1234"})
+        check(text,!parse_command(text,1234,item_command));
     for(const auto* text:{"upgradeSelection:","upgradeSelection:-1234","upgradeSelection:1234:0","upgradeSelection:1234\nrollback:1234"})
         check(text,!parse_command(text,1234,command));
     check("upgrade query cannot enter mutation dispatch", !mutates_roster(RosterAction::upgrade_context) && !mutates_roster(RosterAction::inspect));
@@ -82,6 +88,24 @@ int main(int argc, char** argv) {
     check("selection not ready suppresses stale engine flags", selection_json.find("\"choiceSelection\"")==std::string::npos && selection_json.find("\"upgradeContext\":{\"state\":\"not_ready\",\"actors\":[]}")!=std::string::npos);
     c.command={RosterAction::upgrade_context,-1};c.upgrade_status=PlayerReadStatus::Captured;selection_json=result_json(c,11);
     check("field query never exposes a stale engine observation", selection_json.find("\"choiceSelection\"")==std::string::npos);
+    c.command=item_command;c.upgrade_status=PlayerReadStatus::Captured;
+    c.upgrade.choice_items_observed=true;c.upgrade.choice_child_count=2;
+    c.upgrade.choice_items={{true,true,false,false,false,false,false,0},{true,true,true,true,true,false,true,7002}};
+    auto items_json=result_json(c,12);
+    check("item query serializes explicit action and ordered content",items_json.find("\"action\":\"upgradeItems\"")!=std::string::npos &&
+          items_json.find("\"choiceItems\":{\"observed\":true,\"childCount\":2,\"items\":[")!=std::string::npos &&
+          items_json.find("\"weaponType\":7002,\"dataReferencePresent\":false,\"isNew\":true")!=std::string::npos);
+    std::cout << "ROSTER_ITEMS_JSON " << items_json << '\n';
+    c.upgrade_status=PlayerReadStatus::Error;items_json=result_json(c,13);
+    check("item error suppresses all stale observations",items_json.find("\"choiceItems\"")==std::string::npos && items_json.find("\"choiceSelection\"")==std::string::npos &&
+          items_json.find("\"upgradeContext\":{\"state\":\"error\",\"actors\":[]}")!=std::string::npos);
+    c.upgrade_status=PlayerReadStatus::NotReady;items_json=result_json(c,14);
+    check("item not ready suppresses all stale observations",items_json.find("\"choiceItems\"")==std::string::npos &&
+          items_json.find("\"upgradeContext\":{\"state\":\"not_ready\",\"actors\":[]}")!=std::string::npos);
+    for(auto action:{RosterAction::upgrade_context,RosterAction::upgrade_selection}) {
+        c.command={action,-1};c.upgrade_status=PlayerReadStatus::Captured;items_json=result_json(c,15);
+        check("less detailed query never exposes stale item observations",items_json.find("\"choiceItems\"")==std::string::npos);
+    }
     const auto directory = std::filesystem::path(argv[1]) / ("roster-command-" + std::to_string(GetCurrentProcessId()));
     if (!std::filesystem::create_directory(directory)) return 2;
     try {

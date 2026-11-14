@@ -14,7 +14,7 @@
 
 namespace wsm {
 namespace {
-enum class RosterAction { inspect, enroll, rollback, select_player, copy_character, upgrade_context, upgrade_selection };
+enum class RosterAction { inspect, enroll, rollback, select_player, copy_character, upgrade_context, upgrade_selection, upgrade_items };
 struct RosterCommand { RosterAction action = RosterAction::inspect; std::int32_t player = -1; };
 bool mutates_roster(RosterAction action) {
     return action==RosterAction::enroll || action==RosterAction::rollback ||
@@ -32,11 +32,14 @@ bool parse_command(std::string_view text, DWORD expected_pid, RosterCommand& out
     if (text == "inspect") { output = result; return true; }
     constexpr std::string_view context_prefix="upgradeContext:";
     constexpr std::string_view selection_prefix="upgradeSelection:";
+    constexpr std::string_view items_prefix="upgradeItems:";
     const bool selection_query=text.substr(0,selection_prefix.size())==selection_prefix;
-    if(text.substr(0,context_prefix.size())==context_prefix || selection_query) {
+    const bool items_query=text.substr(0,items_prefix.size())==items_prefix;
+    if(text.substr(0,context_prefix.size())==context_prefix || selection_query || items_query) {
         DWORD pid=0;
-        if(!number(text.substr(selection_query?selection_prefix.size():context_prefix.size()),pid)||pid!=expected_pid)return false;
-        result.action=selection_query?RosterAction::upgrade_selection:RosterAction::upgrade_context;output=result;return true;
+        const auto prefix=items_query?items_prefix:selection_query?selection_prefix:context_prefix;
+        if(!number(text.substr(prefix.size()),pid)||pid!=expected_pid)return false;
+        result.action=items_query?RosterAction::upgrade_items:selection_query?RosterAction::upgrade_selection:RosterAction::upgrade_context;output=result;return true;
     }
     const bool enroll = text.substr(0, 7) == "enroll:";
     const bool select = text.substr(0, 7) == "select:";
@@ -149,8 +152,8 @@ void execute_command(void* raw) {
     try {
         if (!c.guard.verify(c.window.thread, 0, c.identity, c.action_error)) { c.error = c.action_error; return; }
         c.player_status = c.player.read(c.scene, c.player_error);
-        if(c.command.action==RosterAction::upgrade_context || c.command.action==RosterAction::upgrade_selection) {
-            c.upgrade_status=c.command.action==RosterAction::upgrade_selection?
+        if(c.command.action==RosterAction::upgrade_context || c.command.action==RosterAction::upgrade_selection || c.command.action==RosterAction::upgrade_items) {
+            c.upgrade_status=c.command.action==RosterAction::upgrade_items?c.player.read_upgrade_items(c.upgrade,c.upgrade_error):c.command.action==RosterAction::upgrade_selection?
                 c.player.read_upgrade_selection(c.upgrade,c.upgrade_error):c.player.read_upgrade_context(c.upgrade,c.upgrade_error);
             c.action_succeeded=c.upgrade_status==PlayerReadStatus::Captured;
         } else if (mutates_roster(c.command.action)) {
@@ -188,7 +191,7 @@ std::string quoted_json(std::string_view value) {
 }
 std::string result_json(const ProbeContext& c, unsigned sample) {
     const char* state = c.status == CoopRosterStatus::Captured ? "captured" : c.status == CoopRosterStatus::NotReady ? "not_ready" : "error";
-    const char* action = c.command.action == RosterAction::inspect ? "inspect" : c.command.action == RosterAction::enroll ? "enroll" : c.command.action == RosterAction::select_player ? "select" : c.command.action == RosterAction::copy_character ? "copyCharacter" : c.command.action == RosterAction::upgrade_context ? "upgradeContext" : c.command.action == RosterAction::upgrade_selection ? "upgradeSelection" : "rollback";
+    const char* action = c.command.action == RosterAction::inspect ? "inspect" : c.command.action == RosterAction::enroll ? "enroll" : c.command.action == RosterAction::select_player ? "select" : c.command.action == RosterAction::copy_character ? "copyCharacter" : c.command.action == RosterAction::upgrade_context ? "upgradeContext" : c.command.action == RosterAction::upgrade_selection ? "upgradeSelection" : c.command.action == RosterAction::upgrade_items ? "upgradeItems" : "rollback";
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << "{\"schemaVersion\":1,\"sample\":" << sample << ",\"action\":\"" << action
@@ -212,7 +215,7 @@ std::string result_json(const ProbeContext& c, unsigned sample) {
         out << ']';
     }
     out << '}';
-    const bool requested=c.command.action==RosterAction::upgrade_context || c.command.action==RosterAction::upgrade_selection;
+    const bool requested=c.command.action==RosterAction::upgrade_context || c.command.action==RosterAction::upgrade_selection || c.command.action==RosterAction::upgrade_items;
     const bool captured=requested && c.upgrade_status==PlayerReadStatus::Captured;
     const char* upgrade_state=!requested?"not_requested":captured?"captured":c.upgrade_status==PlayerReadStatus::NotReady?"not_ready":"error";
     out << ",\"upgradeContext\":{\"state\":\"" << upgrade_state << '"';
@@ -230,7 +233,7 @@ std::string result_json(const ProbeContext& c, unsigned sample) {
             out << (c.upgrade.choice_group_item_references[i]?"true":"false");
         }
         out << ']';
-        if(c.command.action==RosterAction::upgrade_selection) {
+        if(c.command.action==RosterAction::upgrade_selection || c.command.action==RosterAction::upgrade_items) {
             out << ",\"choiceSelection\":{\"observed\":" << (c.upgrade.choice_selection_observed?"true":"false")
                 << ",\"selectedContainerSlot\":" << c.upgrade.selected_choice_container_slot << ",\"unityAlive\":[";
             for(std::size_t i=0;i<c.upgrade.choice_group_item_unity_alive.size();++i) {
@@ -239,6 +242,22 @@ std::string result_json(const ProbeContext& c, unsigned sample) {
             out << "],\"activeInHierarchy\":[";
             for(std::size_t i=0;i<c.upgrade.choice_group_item_active.size();++i) {
                 if(i)out << ',';out << (c.upgrade.choice_group_item_active[i]?"true":"false");
+            }
+            out << "]}";
+        }
+        if(c.command.action==RosterAction::upgrade_items) {
+            out << ",\"choiceItems\":{\"observed\":" << (c.upgrade.choice_items_observed?"true":"false")
+                << ",\"childCount\":" << c.upgrade.choice_child_count << ",\"items\":[";
+            for(std::size_t i=0;i<c.upgrade.choice_items.size();++i) {
+                const auto& item=c.upgrade.choice_items[i];if(i)out << ',';
+                out << "{\"childReferencePresent\":" << (item.child_present?"true":"false")
+                    << ",\"childUnityAlive\":" << (item.child_unity_alive?"true":"false")
+                    << ",\"componentReferencePresent\":" << (item.component_present?"true":"false")
+                    << ",\"componentUnityAlive\":" << (item.component_unity_alive?"true":"false")
+                    << ",\"fieldsObserved\":" << (item.fields_observed?"true":"false")
+                    << ",\"weaponType\":" << item.weapon_type
+                    << ",\"dataReferencePresent\":" << (item.data_present?"true":"false")
+                    << ",\"isNew\":" << (item.is_new?"true":"false") << '}';
             }
             out << "]}";
         }

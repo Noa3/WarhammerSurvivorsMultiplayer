@@ -3,6 +3,6 @@
   <assembly fullname="PhaserPort" preserve="all" />
   <assembly fullname="Rewired_Core" preserve="all" />
   <assembly fullname="Unity.Mathematics" preserve="all" />
-  <assembly fullname="UnityEngine.CoreModule"><type fullname="UnityEngine.UnitySynchronizationContext" preserve="all" /><type fullname="UnityEngine.Object" preserve="all" /><type fullname="UnityEngine.GameObject" preserve="all" /></assembly>
+  <assembly fullname="UnityEngine.CoreModule"><type fullname="UnityEngine.UnitySynchronizationContext" preserve="all" /><type fullname="UnityEngine.Object" preserve="all" /><type fullname="UnityEngine.GameObject" preserve="all" /><type fullname="UnityEngine.Component" preserve="all" /><type fullname="UnityEngine.Transform" preserve="all" /></assembly>
   <assembly fullname="mscorlib"><type fullname="System.Array" preserve="all" /><type fullname="System.Threading.Thread" preserve="all" /><type fullname="System.Threading.SynchronizationContext" preserve="all" /></assembly>
 </linker>

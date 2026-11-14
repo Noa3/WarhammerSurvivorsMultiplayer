@@ -47,6 +47,7 @@ struct PlayerStateReader::Impl {
         }
         ~Root(){if(h)p.handle_free(h);}
         Root(const Root&)=delete; Root& operator=(const Root&)=delete;
+        Root(Root&& other) noexcept:p(other.p),h(other.h){other.h=nullptr;}
         Il2CppObject* get() const {return h?p.handle_target(h):nullptr;}
     };
     bool type(const Il2CppType* t,const char* name) const {
@@ -190,12 +191,15 @@ PlayerReadStatus PlayerStateReader::read(SceneStateSnapshot& output,std::string&
 }
 
 PlayerReadStatus PlayerStateReader::read_upgrade_context(UpgradeContextSnapshot& output,std::string& error) const {
-    return read_upgrade_context_impl(output,error,false);
+    return read_upgrade_context_impl(output,error,false,false);
 }
 PlayerReadStatus PlayerStateReader::read_upgrade_selection(UpgradeContextSnapshot& output,std::string& error) const {
-    return read_upgrade_context_impl(output,error,true);
+    return read_upgrade_context_impl(output,error,true,false);
 }
-PlayerReadStatus PlayerStateReader::read_upgrade_context_impl(UpgradeContextSnapshot& output,std::string& error,bool observe_selection) const {
+PlayerReadStatus PlayerStateReader::read_upgrade_items(UpgradeContextSnapshot& output,std::string& error) const {
+    return read_upgrade_context_impl(output,error,true,true);
+}
+PlayerReadStatus PlayerStateReader::read_upgrade_context_impl(UpgradeContextSnapshot& output,std::string& error,bool observe_selection,bool observe_items) const {
     error.clear();
     if(!impl_){error="Reader not initialized";return PlayerReadStatus::Error;}
     const auto& p=*impl_;
@@ -296,11 +300,11 @@ PlayerReadStatus PlayerStateReader::read_upgrade_context_impl(UpgradeContextSnap
        !group_count || !p.result_image(group_item,"UnityEngine.Transform","UnityEngine.CoreModule.dll","UnityEngine","Transform") ||
        p.class_from_type(p.a.method_get_return_type(group_item))!=transform_class)
         return fail("Invalid choice container items metadata");
-    Il2CppClass* game_object_class=nullptr;
+    Il2CppClass *game_object_class=nullptr,*unity_object=nullptr,*component=nullptr;
     const MethodInfo *object_alive=nullptr,*component_game_object=nullptr,*active_in_hierarchy=nullptr;
     if(observe_selection) {
-        auto unity_object=p.klass(p.domain,"UnityEngine.CoreModule.dll","UnityEngine","Object");
-        auto component=p.klass(p.domain,"UnityEngine.CoreModule.dll","UnityEngine","Component");
+        unity_object=p.klass(p.domain,"UnityEngine.CoreModule.dll","UnityEngine","Object");
+        component=p.klass(p.domain,"UnityEngine.CoreModule.dll","UnityEngine","Component");
         game_object_class=p.klass(p.domain,"UnityEngine.CoreModule.dll","UnityEngine","GameObject");
         object_alive=p.method(unity_object,"op_Implicit","System.Boolean","UnityEngine.Object",true);
         component_game_object=p.method(component,"get_gameObject","UnityEngine.GameObject");
@@ -317,6 +321,57 @@ PlayerReadStatus PlayerStateReader::read_upgrade_context_impl(UpgradeContextSnap
            p.class_from_type(p.a.method_get_return_type(active_in_hierarchy))!=p.boolclass)
             return fail("Missing or invalid UnityEngine.GameObject.get_activeInHierarchy metadata");
     }
+    Il2CppClass *item_class=nullptr,*data_class=nullptr,*weapon_enum=nullptr;
+    const MethodInfo *child_count=nullptr,*get_child=nullptr,*get_component=nullptr;
+    FieldInfo *type_field=nullptr,*data_field=nullptr,*new_field=nullptr;
+    std::unique_ptr<Impl::Root> item_type;
+    if(observe_items) {
+        item_class=game_class("Wilson.UI","WSLevelUpItemUI");
+        data_class=game_class("VampireSurvivors.Data.Weapons","WeaponData");
+        weapon_enum=game_class("VampireSurvivors.Data","WeaponType");
+        auto system_type=p.klass(p.domain,"mscorlib.dll","System","Type");
+        auto value_type=p.klass(p.domain,"mscorlib.dll","System","ValueType");
+        auto enum_class=p.klass(p.domain,"mscorlib.dll","System","Enum");
+        if(!item_class||!data_class||!weapon_enum||!system_type||!value_type||!enum_class ||
+           !p.image_for_class(item_class,"VampireSurvivors.Runtime.dll") ||
+           !p.image_for_class(data_class,"VampireSurvivors.Runtime.dll") ||
+           !p.image_for_class(weapon_enum,"VampireSurvivors.Runtime.dll") ||
+           !p.image_for_class(transform_class,"UnityEngine.CoreModule.dll") ||
+           !p.assignable(component,transform_class) || !p.assignable(component,item_class) ||
+           p.assignable(unity_object,data_class) || p.assignable(value_type,data_class) ||
+           p.parent(weapon_enum)!=enum_class)
+            return fail("Invalid canonical upgrade item class or inheritance metadata");
+        auto enum_base=p.enum_base(weapon_enum);
+        if(!p.type(enum_base,"System.Int32") || p.class_from_type(enum_base)!=p.intclass)
+            return fail("WeaponType enum underlying type is not canonical Int32");
+        child_count=p.method(transform_class,"get_childCount","System.Int32");
+        get_child=p.method(transform_class,"GetChild","UnityEngine.Transform","System.Int32");
+        get_component=p.method(component,"GetComponent","UnityEngine.Component","System.Type");
+        if(!p.result_image(child_count,"System.Int32","mscorlib.dll","System","Int32") ||
+           p.class_from_type(p.a.method_get_return_type(child_count))!=p.intclass ||
+           !p.result_image(get_child,"UnityEngine.Transform","UnityEngine.CoreModule.dll","UnityEngine","Transform") ||
+           p.class_from_type(p.a.method_get_return_type(get_child))!=transform_class ||
+           p.class_from_type(p.a.method_get_param(get_child,0))!=p.intclass ||
+           !p.result_image(get_component,"UnityEngine.Component","UnityEngine.CoreModule.dll","UnityEngine","Component") ||
+           p.class_from_type(p.a.method_get_return_type(get_component))!=component ||
+           p.class_from_type(p.a.method_get_param(get_component,0))!=system_type)
+            return fail("Invalid canonical child or GetComponent method metadata");
+        const auto item_field=[&](const char* name,Il2CppClass* expected,const char* type_name)->FieldInfo* {
+            auto f=p.field_by_name(item_class,name);
+            if(!f || p.field_parent(f)!=item_class || (p.field_flags(f)&7)!=1 ||
+               (p.field_flags(f)&(16|64)) || !p.type(p.field_type(f),type_name) ||
+               p.class_from_type(p.field_type(f))!=expected)return nullptr;
+            return f;
+        };
+        type_field=item_field("_type",weapon_enum,"VampireSurvivors.Data.WeaponType");
+        data_field=item_field("_data",data_class,"VampireSurvivors.Data.Weapons.WeaponData");
+        new_field=item_field("_isNew",p.boolclass,"System.Boolean");
+        if(!type_field||!data_field||!new_field || type_field==data_field || type_field==new_field || data_field==new_field)
+            return fail("Invalid canonical upgrade item field metadata");
+        auto raw_type=p.a.type_get_object(p.a.class_get_type(item_class));
+        item_type=std::make_unique<Impl::Root>(p,raw_type);
+        if(!p.is_a(item_type->get(),system_type))return fail("Unable to root canonical upgrade item reflection type");
+    }
     const auto read_ref=[&](Il2CppObject* owner,FieldInfo* field,Il2CppClass* expected,std::unique_ptr<Impl::Root>& root)->bool {
         if(!p.is_a(owner,p.field_parent(field))){error="Unexpected diagnostic field owner";return false;}
         Il2CppObject* raw=nullptr;p.field_value(owner,field,&raw);
@@ -326,7 +381,7 @@ PlayerReadStatus PlayerStateReader::read_upgrade_context_impl(UpgradeContextSnap
     };
     UpgradeContextSnapshot result;result.choice_selection_observed=observe_selection;std::unique_ptr<Impl::Root> page;
     status=find_one(page_class,page,result.level_up_page_count);if(status!=PlayerReadStatus::Captured)return status;
-    std::unique_ptr<Impl::Root> group,group_items;
+    std::unique_ptr<Impl::Root> group,group_items,selected_container;
     if(!read_ref(page->get(),group_field,group_class,group))return PlayerReadStatus::Error;
     result.choice_group_present=group->get()!=nullptr;
     if(result.choice_group_present) {
@@ -362,10 +417,74 @@ PlayerReadStatus PlayerStateReader::read_upgrade_context_impl(UpgradeContextSnap
                     }
                     result.choice_group_item_unity_alive.push_back(alive!=0);
                     result.choice_group_item_active.push_back(active!=0);
-                    if(active && result.selected_choice_container_slot<0)result.selected_choice_container_slot=i;
+                    if(active && result.selected_choice_container_slot<0) {
+                        result.selected_choice_container_slot=i;
+                        if(observe_items) {
+                            selected_container=std::make_unique<Impl::Root>(std::move(item));
+                            if(!p.is_a(selected_container->get(),transform_class))return fail("Unable to retain selected choice container root");
+                        }
+                    }
                 }
             }
         }
+    }
+    if(observe_items && selected_container) {
+        const auto check_count=[&](std::int32_t& value)->bool {
+            if(!p.is_a(selected_container->get(),transform_class)){error="Lost selected choice container root";return false;}
+            auto boxed=p.invoke(child_count,selected_container->get(),nullptr,error);
+            if(!error.empty()){error="Choice child count observation: "+error;return false;}
+            if(!p.integer32(boxed,value,error)){error="Choice child count observation: "+error;return false;}
+            if(value<0||value>32){error="Choice child count outside supported bound";return false;}
+            return true;
+        };
+        std::int32_t size=0;
+        if(!check_count(size))return PlayerReadStatus::Error;
+        result.choice_items_observed=true;result.choice_child_count=size;
+        for(std::int32_t i=0;i<size;++i) {
+            std::int32_t current=0;
+            if(!check_count(current))return PlayerReadStatus::Error;
+            if(current!=size)return fail("Choice child count changed during observation");
+            void* index[]={&i};auto raw=p.invoke(get_child,selected_container->get(),index,error);
+            if(!error.empty()){error="Choice GetChild observation: "+error;return PlayerReadStatus::Error;}
+            Impl::Root child(p,raw);UpgradeChoiceItemSnapshot row;row.child_present=raw!=nullptr;
+            if(raw && !p.is_a(child.get(),transform_class))return fail("Unable to root expected choice child Transform");
+            if(child.get()) {
+                std::uint8_t alive=0;void* args[]={child.get()};
+                auto boxed=p.invoke(object_alive,nullptr,args,error);
+                if(!error.empty()){error="Choice child liveness observation: "+error;return PlayerReadStatus::Error;}
+                if(!p.value(boxed,p.boolclass,alive,error)){error="Choice child liveness observation: "+error;return PlayerReadStatus::Error;}
+                if(alive>1)return fail("Invalid choice child liveness Boolean");
+                row.child_unity_alive=alive!=0;
+                if(alive) {
+                    if(!item_type->get())return fail("Lost upgrade item reflection type root");
+                    void* type_arg[]={item_type->get()};
+                    auto raw_component=p.invoke(get_component,child.get(),type_arg,error);
+                    if(!error.empty()){error="Choice child GetComponent observation: "+error;return PlayerReadStatus::Error;}
+                    Impl::Root item(p,raw_component);row.component_present=raw_component!=nullptr;
+                    if(raw_component && !p.is_a(item.get(),item_class))return fail("Unable to root expected upgrade item component");
+                    if(item.get()) {
+                        void* item_args[]={item.get()};auto boxed_item=p.invoke(object_alive,nullptr,item_args,error);
+                        if(!error.empty()){error="Upgrade item liveness observation: "+error;return PlayerReadStatus::Error;}
+                        std::uint8_t item_alive=0;
+                        if(!p.value(boxed_item,p.boolclass,item_alive,error)){error="Upgrade item liveness observation: "+error;return PlayerReadStatus::Error;}
+                        if(item_alive>1)return fail("Invalid upgrade item liveness Boolean");
+                        row.component_unity_alive=item_alive!=0;
+                        if(item_alive) {
+                            p.field_value(item.get(),type_field,&row.weapon_type);
+                            std::uint8_t is_new=0;p.field_value(item.get(),new_field,&is_new);
+                            if(is_new>1)return fail("Invalid upgrade item isNew Boolean");
+                            std::unique_ptr<Impl::Root> data;
+                            if(!read_ref(item.get(),data_field,data_class,data))return PlayerReadStatus::Error;
+                            row.data_present=data->get()!=nullptr;row.is_new=is_new!=0;row.fields_observed=true;
+                        }
+                    }
+                }
+            }
+            result.choice_items.push_back(row);
+        }
+        std::int32_t final_count=0;
+        if(!check_count(final_count))return PlayerReadStatus::Error;
+        if(final_count!=size)return fail("Choice child count changed during observation");
     }
     auto raw_list=p.invoke(p.players,manager->get(),nullptr,error);
     if(!error.empty())return PlayerReadStatus::Error;

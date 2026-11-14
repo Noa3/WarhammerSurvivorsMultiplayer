@@ -81,6 +81,41 @@ public sealed class PlayerFixture : MonoBehaviour {
   gm.players[1].input=null;Check("upgrade_selection_late_error",fixture_upgrade(managed,os,26));gm.players[1].input=new Rewired.Player(52);
   group.ConfigureItems(new System.Collections.Generic.List<Transform>(new Transform[9]));Check("upgrade_selection_over_bound",fixture_upgrade(managed,os,27));
   gm.running=false;Check("upgrade_selection_stopped",fixture_upgrade(managed,os,28));gm.running=true;page.ConfigureChoiceGroup(null);
+  var itemContainer=new GameObject("ItemContainer");
+  for(int i=0;i<4;++i) {
+   var child=new GameObject("ItemChild"+i);child.transform.SetParent(itemContainer.transform,false);
+   if(i!=0)child.AddComponent<Wilson.UI.WSLevelUpItemUI>().Configure(
+    i==2?WeaponType.FixtureData:i==3?WeaponType.FixtureMissingData:WeaponType.VOID,
+    i==2?new VampireSurvivors.Data.Weapons.WeaponData():null,i==2);
+  }
+  group.ConfigureItems(new System.Collections.Generic.List<Transform> { itemContainer.transform });page.ConfigureChoiceGroup(group);
+  Check("upgrade_items_ordered_fields",fixture_upgrade(managed,os,29));
+  DestroyImmediate(itemContainer);page.ConfigureChoiceGroup(null);
+  Check("upgrade_items_null_group",fixture_upgrade(managed,os,30));
+  var boundedContainer=new GameObject("BoundedItemContainer");
+  group.ConfigureItems(new System.Collections.Generic.List<Transform> { boundedContainer.transform });page.ConfigureChoiceGroup(group);
+  Check("upgrade_items_empty_children",fixture_upgrade(managed,os,31));
+  for(int i=0;i<32;++i)new GameObject("BoundChild"+i).transform.SetParent(boundedContainer.transform,false);
+  Check("upgrade_items_at_bound",fixture_upgrade(managed,os,32));
+  var extraChild=new GameObject("OverBoundChild");extraChild.transform.SetParent(boundedContainer.transform,false);
+  Check("upgrade_items_over_bound",fixture_upgrade(managed,os,33));DestroyImmediate(extraChild);
+  Check("upgrade_items_wrong_thread",fixture_upgrade(managed,os+1,34));
+  gm.players[1].input=null;Check("upgrade_items_late_error",fixture_upgrade(managed,os,35));gm.players[1].input=new Rewired.Player(52);
+  gm.running=false;Check("upgrade_items_stopped",fixture_upgrade(managed,os,36));gm.running=true;
+  var firstContainer=new GameObject("FirstItemContainer");
+  var firstChild=new GameObject("FirstItemChild");firstChild.transform.SetParent(firstContainer.transform,false);
+  firstChild.AddComponent<Wilson.UI.WSLevelUpItemUI>().Configure(WeaponType.FixtureData,new VampireSurvivors.Data.Weapons.WeaponData(),true);
+  extraChild=new GameObject("IgnoredOverBoundChild");extraChild.transform.SetParent(boundedContainer.transform,false);
+  group.ConfigureItems(new System.Collections.Generic.List<Transform> { firstContainer.transform,boundedContainer.transform });
+  Check("upgrade_items_first_container",fixture_upgrade(managed,os,37));DestroyImmediate(boundedContainer);DestroyImmediate(firstContainer);
+  var directContainer=new GameObject("DirectItemContainer");
+  var directChild=new GameObject("DecorativeParent");directChild.transform.SetParent(directContainer.transform,false);
+  var nestedChild=new GameObject("NestedItem");nestedChild.transform.SetParent(directChild.transform,false);
+  nestedChild.AddComponent<Wilson.UI.WSLevelUpItemUI>().Configure(WeaponType.FixtureMissingData,null,false);
+  group.ConfigureItems(new System.Collections.Generic.List<Transform> { directContainer.transform });
+  Check("upgrade_items_direct_only",fixture_upgrade(managed,os,38));
+  var removed=directChild.AddComponent<Wilson.UI.WSLevelUpItemUI>();removed.Configure(WeaponType.FixtureData,new VampireSurvivors.Data.Weapons.WeaponData(),true);DestroyImmediate(removed);
+  Check("upgrade_items_removed_component",fixture_upgrade(managed,os,39));DestroyImmediate(directContainer);page.ConfigureChoiceGroup(null);
   DestroyImmediate(gm.gameObject);Check("upgrade_no_manager",fixture_upgrade(managed,os,12));
  }
 }

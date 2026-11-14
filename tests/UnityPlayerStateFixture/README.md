@@ -71,7 +71,8 @@ Runtime facts observed in the real IL2CPP player (not assumptions):
   last decision (`status` + detail) on every failure.
 
 `link.xml` preserves the fixture assemblies and the reflection targets the
-reader needs (`UnityEngine.Object`, `UnityEngine.GameObject`, `UnitySynchronizationContext`,
+reader needs (`UnityEngine.Object`, `UnityEngine.GameObject`, `UnityEngine.Component`,
+`UnityEngine.Transform`, `UnitySynchronizationContext`,
 `System.Array`, `System.Threading.*`). Stripping in a real game differs.
 
 Checks performed by `Assets/PlayerFixture.cs` (all against the production
@@ -145,7 +146,19 @@ game remains a separate compatibility question.
 Both queries reject overlarge lists rather than returning a partial negative.
 The selection query observes every bounded entry and reports the first live
 and active match; it is not claimed equivalent to the stock native selection
-or its timing. No Transform children, card components or card data are observed.
+or its timing. Neither query observes Transform children, card components or card data.
+
+The separate `read_upgrade_items` query is exercised with original fixture types
+in `Assets/Runtime/UpgradeItems.cs`; no game assembly is linked. Its ordered
+four-child case distinguishes a decorative child, zero type/null data, nonzero
+type/present data and nonzero type/missing data. Additional `upgrade_items_*`
+cases cover an absent group, an empty selected container, exactly 32 and over 32
+direct children, wrong-thread/stopped-run refusal, a late actor error after
+item observation, first-container-only traversal, direct children rather than
+descendants and a removed component. The fully seeded atomicity oracle includes
+all item fields and the ordered vector; ordinary successful queries must reset
+these opt-in observations to their defaults. Missing applicable card data is an
+observed candidate, not a manufactured exception or a gameplay fix.
 
 The reader trusts the inspected runtime's provenance. It resolves named contracts
 and checks important class/image identities, but is not an admission boundary for

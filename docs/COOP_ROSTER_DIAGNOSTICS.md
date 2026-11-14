@@ -55,6 +55,7 @@ stop the diagnostic loop.
 | `inspect` | Capture configured/enrolled IDs, optional menu configuration and current player observation. |
 | `upgradeContext:<pid>` | Explicit read-only upgrade-context query in an existing run; never enters roster mutation dispatch. |
 | `upgradeSelection:<pid>` | Separate opt-in context query with bounded Unity-reported container liveness and hierarchy activity. |
+| `upgradeItems:<pid>` | Separate opt-in query for at most 32 direct children and their item-component/data observations in the diagnostic selected container. |
 | `enroll:<pid>:<id>` | Add one existing configured player to the exact one-player baseline. |
 | `select:<pid>:<id>` | Select an enrolled menu player, not a hero; no exclusive input control or vibration. |
 | `copy:<pid>:<id>` | Copy the stock menu's currently bought character into that player's existing selection entry. |
@@ -80,7 +81,7 @@ native asset or correct behavior. Getter names do not establish purity.
 ### Explicit upgrade-context query
 
 `upgradeContext:<pid>` invokes the structural context reader. Apart from the
-separate selection query below, ordinary commands report
+separate selection/item queries below, ordinary commands report
 `upgradeContext.state` as `not_requested`; optional Wilson/equipment metadata
 is not required by normal reader initialization or observation. The new query
 still counts toward the same eight-request budget and uses the verified main
@@ -172,6 +173,59 @@ diagnostic selected container was therefore not observed at that post-exception
 snapshot. Card components/data and the exact original throw operand remain
 unverified. The owned game closed normally; no in-run roster rollback or page
 mutation was attempted.
+
+### Explicit item-content observation
+
+`upgradeItems:<pid>` invokes `read_upgrade_items`, retaining the first container
+selected by the diagnostic Unity liveness/activity observation. It does not
+extend the existing structural or selection-only calls. Additional bindings are
+resolved only for the item query: canonical `Transform.get_childCount(): Int32`,
+`Transform.GetChild(Int32): Transform` and
+`Component.GetComponent(System.Type): Component` from `UnityEngine.CoreModule.dll`.
+The argument is the rooted runtime type of `Wilson.UI.WSLevelUpItemUI`. Its private
+instance `_type`, `_data` and `_isNew` fields must match the exact declaring
+class, game image and canonical field types. `VampireSurvivors.Data.WeaponType`
+must have canonical `System.Int32` as its enum base; the referenced
+`VampireSurvivors.Data.Weapons.WeaponData` is an ordinary managed class.
+
+Successful context captures include `choiceSelection` and `choiceItems`:
+
+- No selected container: `observed: false`, `childCount: -1`, empty `items`.
+  This is not a complete empty-child observation.
+- A selected container with zero children: `observed: true`, `childCount: 0`,
+  empty `items`.
+- Otherwise, `items` is ordered by direct-child index. Each row distinguishes
+  `childReferencePresent`, `childUnityAlive`, `componentReferencePresent`,
+  `componentUnityAlive`, `fieldsObserved`, `weaponType`, `dataReferencePresent`
+  and `isNew`. Values are meaningful only with their corresponding observed and
+  presence flags. A decorative child may legitimately lack the component;
+  a zero weapon type with null data is not automatically an invalid card.
+
+Negative counts or counts above 32 refuse the entire query rather than returning
+a prefix. Count changes detected during traversal, failed invocations, invalid
+types, metadata or roots also refuse the complete capture. Errors and
+`not_ready` emit neither item nor selection values, leaving the reader caller's
+snapshot unchanged. Counts are sampled; changes that revert between samples or
+same-count reordering are not detected. Only the selected container's direct
+children are traversed, never descendants or another container's children.
+
+No page operation, field setter, exception suppression or gameplay repair is
+performed. `GetComponent(Type)` is not proven equivalent to the stock generic
+call, and this post-exception observation cannot establish the original throw
+operand or state. Invocation purity and scene stability are not established.
+
+In one separate target-game 2.1.6 first-failed-upgrade capture, the diagnostic
+selected slot 2 and observed exactly four direct children. All four reported
+live Transforms. The first three returned live item components with observed
+fields, weapon types `[5072, 5012, 5002]`, present data references and `isNew:
+true`. The fourth returned no managed item component, so its fields were not
+observed; its default zero/false values are not card data. The ordinary Level-1
+pause reported `not_ready`; both actual heroes `[5012, 5001]` subsequently
+reached Level 2 alive with equal XP. The empty selection and
+`CanCharacterReceivePass` exception persisted. This narrows the observed
+post-exception state but does not prove the fourth child is invalid, identify
+the original generic argument/throw operand, or justify removing, replacing or
+adding a component. The owned game and controller both exited normally.
 
 ## Mutation boundaries
 

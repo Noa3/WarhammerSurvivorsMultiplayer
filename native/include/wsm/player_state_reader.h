@@ -15,6 +15,12 @@ struct UpgradeActorContext {
     bool weapons_manager_present = false, accessories_manager_present = false;
     bool accessories_collection_present = false;
 };
+struct UpgradeChoiceItemSnapshot {
+    bool child_present = false, child_unity_alive = false;
+    bool component_present = false, component_unity_alive = false;
+    bool fields_observed = false, data_present = false, is_new = false;
+    std::int32_t weapon_type = 0;
+};
 struct UpgradeContextSnapshot {
     std::vector<UpgradeActorContext> actors;
     std::int32_t level_up_page_count = 0;
@@ -28,6 +34,10 @@ struct UpgradeContextSnapshot {
     std::vector<bool> choice_group_item_unity_alive, choice_group_item_active;
     // Diagnostic first Unity-reported live/active entry, not proven stock call-time selection.
     std::int32_t selected_choice_container_slot = -1;
+    // False/-1 when not requested or no container was selected; never a truncated prefix.
+    bool choice_items_observed = false;
+    std::int32_t choice_child_count = -1;
+    std::vector<UpgradeChoiceItemSnapshot> choice_items;
 };
 enum class PlayerReadStatus { Captured, NotReady, Error };
 // Metadata is borrowed for the runtime lifetime. The expected IDs must be
@@ -46,12 +56,14 @@ public:
     [[nodiscard]] PlayerReadStatus read_upgrade_context(UpgradeContextSnapshot& output, std::string& error) const;
     // Separate opt-in query: additionally invokes validated Unity engine observation methods.
     [[nodiscard]] PlayerReadStatus read_upgrade_selection(UpgradeContextSnapshot& output, std::string& error) const;
+    // Separate opt-in query: at most 32 direct children of the selected container.
+    [[nodiscard]] PlayerReadStatus read_upgrade_items(UpgradeContextSnapshot& output, std::string& error) const;
 #ifdef WSM_PLAYER_STATE_TESTING
     void test_fail_next_scene_root(bool players);
     void test_use_wrong_equipment_collection();
 #endif
 private:
-    PlayerReadStatus read_upgrade_context_impl(UpgradeContextSnapshot& output, std::string& error, bool observe_selection) const;
+    PlayerReadStatus read_upgrade_context_impl(UpgradeContextSnapshot& output, std::string& error, bool observe_selection, bool observe_items) const;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
