@@ -18,7 +18,9 @@ Game inspection and probes also require an installed copy of Warhammer Survivors
 pwsh -File tools/verify.ps1
 ```
 
-The script builds the native bridge and managed solution, runs CTest, then runs the Core, Lobby, App and Launcher test programs. The GUI tests open temporary application windows. A successful run ends with `All automated development checks passed.` followed by a reminder that gameplay testing is separate.
+The script builds the native bridge and managed solution, runs CTest, then runs the Core, Lobby, App and Launcher test programs, an owned-window shutdown test and archive rejection tests. Python 3 is required for the packaging tests. The GUI tests open temporary application windows. A successful run ends with `All automated development checks passed.` followed by a reminder that gameplay testing is separate.
+
+Original Unity integration is opt-in and never points at the installed game. Build the [original Unity fixture](../tests/UnityInteropFixture/README.md), set `WSM_UNITY_FIXTURE_DIRECTORY` to its output directory (containing `Fixture.exe` and `Fixture_Data`), then run verification to include cache integrity/update tests. For the standalone launch lifecycle, also set `WSM_UNITY_FIXTURE_INSTALLATION` to a private copy of that same fixture with the executable/data directory named `WarhammerSurvivors.exe` and `WarhammerSurvivors_Data`; retain its original native runtime files. This naming only exercises the launcher's installation contract; it is not a game compatibility fixture. The test starts only this supplied original player. Omitted environment settings mean those optional checks did not run; the ordinary pass/skip totals do not imply otherwise.
 
 To run individual checks:
 

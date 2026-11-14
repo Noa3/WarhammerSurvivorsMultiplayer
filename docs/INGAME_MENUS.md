@@ -2,6 +2,12 @@
 
 **The current application has a separate Windows lobby. It does not add buttons to Warhammer Survivors yet.** Neither campaign selection nor bestiary/upgrade navigation is connected to the lobby. Do not expect the packaged application to show an in-game menu or start a multiplayer run.
 
+## Optional single-player launch
+
+Select **Spiel separat starten (experimentell)**, choose your installed game folder and read the confirmation before proceeding. The application prepares a full separate binary/data copy in `%LOCALAPPDATA%/WSM/runtime-cache` and starts it windowed. Allow additional disk space approximately equal to the copied installation; verification may take time. All included files are hashed so asset-only updates create a fresh cache. Old caches are retained, not silently deleted. Logs are stored in `%LOCALAPPDATA%/WSM/logs`.
+
+**This does not isolate saves, the user profile or Steam Cloud.** The game may still read and modify its normal user data. The separate lobby stays visible and its connection continues. Close the application explicitly to close the child game it started; it never attaches to an already running game. The launch/lobby lifecycle is tested with an original Unity validation player, not a real multiplayer run or the installed game. Cross-process in-game surfaces are not shipped because their visible rendering was unreliable in the Unity test.
+
 ## Campaign selection and preparation
 
 The intended entry is a co-op action after selecting a campaign, before starting a run. Hosting and joining belong there rather than replacing the original campaign selector. The host chooses shared campaign/run settings; each participant keeps their own hero, weapons, permanent upgrades and unlock availability. The application must validate these choices against the actual game before accepting a start.
@@ -20,6 +26,6 @@ At run end, the party should return to its preparation lobby instead of requirin
 
 The HTTP lobby client sends background heartbeats independently of application window refreshes. Its server still expires a genuinely silent guest. The TCP session library sends a correlated ping every five seconds and requires its matching pong within 30 seconds. Its accept, receive and keepalive loops run independently of the UI/game synchronization context. Tests cover an idle session and a blocked menu context for more than 30 seconds, plus peers that send other traffic but do not answer pings. See the [session API](../src/Wsm.Core/README.md) for framing and timeout details. Neither transport can keep a crashed, sleeping or suspended process alive, and keeping a connection alive does not restore a lost run or save data.
 
-The native observation tools do not yet provide a verified safe gameplay-update/menu hook. Building an original IL2CPP validation player also requires Windows IL2CPP build support, which was absent from the tested local Unity editor. No incomplete fixture or speculative menu hook is part of the runtime package.
+The native observation tools do not yet provide a verified gameplay-update/menu hook in the target game. An original Unity 6000.0.74f1 Windows IL2CPP fixture now verifies the supported interop calls and rejects wrong thread/context inputs; its source is under `tests/UnityInteropFixture`. This is not target-game compatibility or gameplay proof. The original fixture's built Unity runtime is not part of the download.
 
 See [session rules](SESSION_RULES.md) for current host settings, or [connection help](CONNECTION_HELP.md) for failed connections.

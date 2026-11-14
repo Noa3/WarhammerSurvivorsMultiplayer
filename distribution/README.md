@@ -4,9 +4,9 @@
 
 ## Start without building
 
-Download the repository ZIP or clone the repository, extract it completely, then open:
+For normal use, download `WSM-portable-win-x64.zip` from [GitHub Releases](https://github.com/Noa3/WarhammerSurvivorsMultiplayer/releases), extract its complete `WSM` folder and open `WSM/lobby/Wsm.App.exe`.
 
-`win-x64/lobby/Wsm.App.exe`
+Alternatively, download the repository ZIP or clone it, extract it completely, then open `distribution/win-x64/lobby/Wsm.App.exe` relative to the repository root. Do not download just the executable. See the [distribution guide](../docs/DISTRIBUTION.md) for installation, removal and the experimental Vortex/FOMOD alternative.
 
 Keep all accompanying files and subdirectories together. This is a self-contained .NET 10 Windows x64 distribution; a separate .NET SDK/runtime installation is not required for the packaged managed applications. Runtime licenses and third-party notices are included under `win-x64/licenses/` and must accompany redistribution.
 

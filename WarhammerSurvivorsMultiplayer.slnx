@@ -11,5 +11,6 @@
     <Project Path="tests/Wsm.Core.Tests/Wsm.Core.Tests.csproj" />
     <Project Path="tests/Wsm.Launcher.Tests/Wsm.Launcher.Tests.csproj" />
     <Project Path="tests/Wsm.Lobby.Tests/Wsm.Lobby.Tests.csproj" />
+    <Project Path="tests/Wsm.OwnedWindowFixture/Wsm.OwnedWindowFixture.csproj" />
   </Folder>
 </Solution>

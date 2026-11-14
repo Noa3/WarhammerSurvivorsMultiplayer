@@ -23,6 +23,15 @@ tests/UnityObservationFixture/Recordings/
 tests/UnityObservationFixture/*.csproj
 tests/UnityObservationFixture/*.sln
 tests/UnityObservationFixture/*.slnx
+tests/UnityInteropFixture/Library/
+tests/UnityInteropFixture/Temp/
+tests/UnityInteropFixture/Logs/
+tests/UnityInteropFixture/UserSettings/
+tests/UnityInteropFixture/Build/
+tests/UnityInteropFixture/Builds/
+tests/UnityInteropFixture/*.csproj
+tests/UnityInteropFixture/*.sln
+tests/UnityInteropFixture/*.slnx
 
 # Local-only analysis, assistant state, captures, and proprietary game data
 .local/

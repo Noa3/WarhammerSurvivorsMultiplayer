@@ -6,11 +6,11 @@ A Windows co-op project for **Warhammer Survivors**, with an IP lobby and game-i
 
 ## Get started
 
-1. Download this repository using **Code > Download ZIP**, or clone it.
-2. Extract the complete repository and keep the included files together.
-3. Open `distribution/win-x64/lobby/Wsm.App.exe` on Windows x64.
+1. Open [GitHub Releases](https://github.com/Noa3/WarhammerSurvivorsMultiplayer/releases) and download **WSM-portable-win-x64.zip** from the tools preview.
+2. Extract its complete `WSM` folder into a new location. Keep the accompanying files together.
+3. Open `WSM/lobby/Wsm.App.exe` on Windows x64.
 
-The package includes the .NET runtime. See the [Windows package guide](distribution/README.md) for its contents and checksums.
+The package includes the .NET runtime; Unity and development tools are not needed to use it. The repository ZIP also includes the application under `distribution/win-x64/lobby/Wsm.App.exe`. See the [Windows package guide](distribution/README.md) for contents and checksums, and the [distribution guide](docs/DISTRIBUTION.md) for the experimental Vortex archive and its restrictions.
 
 ### Host or join a lobby
 
@@ -28,6 +28,10 @@ For a trusted LAN or VPN, select the LAN binding and share your reachable IPv4 a
 Hero and weapon IDs are currently entered manually and are not checked against the game's unlocks. Session rules are available in the lobby, but do not control a running game yet. **Start anfragen** reports that game integration is unavailable. See [session rules](docs/SESSION_RULES.md) for the sharing options and their current limits. Use the same application revision on every computer; older protocol versions cannot join.
 
 The lobby uses unencrypted HTTP and has no password. Use a trusted LAN or secured VPN, not a public internet port. Cross-machine connectivity has not yet been tested. For connection problems, see [connection troubleshooting](docs/CONNECTION_HELP.md).
+
+### Optional separate game launch
+
+**Spiel separat starten (experimentell)** prepares a separate copy of your installed game and starts it windowed while leaving the lobby accessible. The confirmation warns that **saves and Steam Cloud are not isolated**. This is not a co-op start or an in-game menu. See [launch precautions and cache storage](docs/INGAME_MENUS.md#optional-single-player-launch).
 
 ## Planned gameplay
 

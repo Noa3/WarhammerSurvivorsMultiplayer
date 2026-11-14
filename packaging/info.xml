@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fomod>
+  <Name>WSM Experimental Lobby and Diagnostics</Name>
+  <Author>Warhammer Survivors Multiplayer contributors</Author>
+  <Description>Experimental standalone lobby and diagnostic tools; not playable multiplayer.</Description>
+</fomod>

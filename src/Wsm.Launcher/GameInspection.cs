@@ -8,8 +8,11 @@ namespace Wsm.Launcher;
 public sealed record GameInspection(string Directory, string ProductVersion, int MetadataVersion,
     IReadOnlyDictionary<string, string> Sha256, string[] ForeignLoaderFiles, bool HasVortexBackup)
 {
-    public static GameInspection Inspect(string directory)
+    public static GameInspection Inspect(string directory) => Inspect(directory, CancellationToken.None);
+
+    public static GameInspection Inspect(string directory, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var root = Path.GetFullPath(directory);
         RuntimePreparation.RejectReparseAncestors(root);
         var hashes = new SortedDictionary<string, string>(StringComparer.Ordinal);
@@ -18,7 +21,7 @@ public sealed record GameInspection(string Directory, string ProductVersion, int
             var path = Path.Combine(root, file);
             RequireNativeX64(path);
             using var stream = File.OpenRead(path);
-            hashes.Add(file, Convert.ToHexStringLower(SHA256.HashData(stream)));
+            hashes.Add(file, HashStream(stream, cancellationToken));
         }
         var metadata = Path.Combine(root, "WarhammerSurvivors_Data", "il2cpp_data", "Metadata", "global-metadata.dat");
         using var reader = new BinaryReader(File.OpenRead(metadata));
@@ -26,11 +29,26 @@ public sealed record GameInspection(string Directory, string ProductVersion, int
         var version = reader.ReadInt32();
         if (version is < 24 or > 40) throw new InvalidDataException("Unsupported IL2CPP metadata version: " + version);
         reader.BaseStream.Position = 0;
-        hashes.Add("global-metadata.dat", Convert.ToHexStringLower(SHA256.HashData(reader.BaseStream)));
+        hashes.Add("global-metadata.dat", HashStream(reader.BaseStream, cancellationToken));
         var conflicts = new[] { "version.dll", "winhttp.dll", "dinput8.dll", "doorstop_config.ini", "MelonLoader", "BepInEx" }
             .Where(file => File.Exists(Path.Combine(root, file)) || System.IO.Directory.Exists(Path.Combine(root, file))).ToArray();
         return new(root, FileVersionInfo.GetVersionInfo(Path.Combine(root, "WarhammerSurvivors.exe")).ProductVersion ?? "unknown",
             version, hashes, conflicts, File.Exists(Path.Combine(root, "GameAssembly.dll.vortex_backup")));
+    }
+
+    internal static string HashStream(Stream stream, CancellationToken cancellationToken)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[128 * 1024];
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            int read = stream.Read(buffer);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (read == 0) break;
+            hash.AppendData(buffer, 0, read);
+        }
+        return Convert.ToHexStringLower(hash.GetHashAndReset());
     }
 
     public static void RequireNativeX64(string path)

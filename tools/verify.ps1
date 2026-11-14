@@ -21,6 +21,13 @@ try {
     Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.Core.Tests', '-c', 'Release', '--no-build')
     Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.Lobby.Tests', '-c', 'Release', '--no-build')
     Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.App.Smoke', '-c', 'Release', '--no-build')
+    $windowFixture = "$root/tests/Wsm.OwnedWindowFixture/bin/Release/net10.0-windows/Wsm.OwnedWindowFixture.exe"
+    Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.App.Smoke', '-c', 'Release', '--no-build', '--', '--owned-stop-fixture', $windowFixture)
+    if (-not [string]::IsNullOrWhiteSpace($env:WSM_UNITY_FIXTURE_INSTALLATION)) {
+        $contextWork = "$root/artifacts/context-fixture-$([Guid]::NewGuid().ToString('N'))"
+        Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.App.Smoke', '-c', 'Release', '--no-build', '--', '--context-fixture', $env:WSM_UNITY_FIXTURE_INSTALLATION, $contextWork)
+    }
+    Invoke-Checked python @('-m', 'unittest', 'discover', '-s', 'tests/Packaging', '-v')
     Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.Launcher.Tests', '-c', 'Release', '--no-build', '--', "$root/artifacts/native-build/Release")
     Write-Host 'All automated development checks passed. Live game and multiplayer gameplay are separate acceptance gates.'
 } finally {

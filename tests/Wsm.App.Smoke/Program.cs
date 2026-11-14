@@ -8,14 +8,18 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        ApplicationConfiguration.Initialize();
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
         var host = new LobbyForm(); var guest = new LobbyForm();
         host.Shown += async (_, _) => {
             try
             {
-                if (args is ["--policy-ui"]) await PolicyUiRegression.Run();
+                if (args is ["--owned-stop-fixture", var fixture]) await OwnedStopRegression.Run(fixture);
+                else if (args is ["--context-fixture", var contextInstallation, var contextWork]) await ContextLifecycleRegression.Run(contextInstallation, contextWork);
+                else if (args is ["--policy-ui"]) await PolicyUiRegression.Run();
                 else if (args.Length == 0) { await Run(host, guest); Console.WriteLine("PASS: real WinForms controls, loopback HTTP, roster/loadouts/readiness/rules/start/leave/shutdown"); }
-                else throw new ArgumentException("Supported filter: --policy-ui");
+                else throw new ArgumentException("Supported filters: --policy-ui, --owned-stop-fixture <exe>, --context-fixture <installation> <work>");
                 result = 0;
             }
             catch (Exception ex) { Console.Error.WriteLine("FAIL: " + ex); }

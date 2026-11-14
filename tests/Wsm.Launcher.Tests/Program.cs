@@ -26,6 +26,11 @@ try
         try { FailureCleanup.Run(() => throw cleanup, null); throw new Exception("expected cleanup failure"); }
         catch (IOException ex) { Check(ReferenceEquals(ex, cleanup), "cleanup-only exception changed"); }
     });
+    Run("owned embedded game launch contract exists", OwnedLaunchRegression.RequireContract);
+    Run("owned game stop exposes an awaitable contract", OwnedLaunchRegression.AsyncStopContract);
+    Run("hash cancellation interrupts before the next read", OwnedLaunchRegression.HashCancellation);
+    if (Environment.GetEnvironmentVariable("WSM_UNITY_FIXTURE_DIRECTORY") is { Length: > 0 } unityFixture)
+        Run("original Unity runtime cache preparation, reuse and tamper refusal", () => CacheIntegrationRegression.Run(root, unityFixture));
     Run("filesystem root contains descendants", () =>
     {
         var volume = Path.GetPathRoot(root)!;
@@ -76,6 +81,10 @@ try
     });
     if (args is [var fixtures] && OperatingSystem.IsWindows())
     {
+        Run("owned game launch rejects unsafe layout, canceled and unsupported builds before writes", () =>
+            OwnedLaunchRegression.Guards(root, CreateInspectableGame("unsupported-owned-launch", fixtures)));
+        Run("canceling preparation removes only owned staging and preserves source", () =>
+            OwnedLaunchRegression.Cancellation(root, CreateGame("cancel-source")));
         Run("short path aliases cannot bypass preparation containment", () =>
         {
             var game = CreateGame("Long Original Directory Name For Alias");

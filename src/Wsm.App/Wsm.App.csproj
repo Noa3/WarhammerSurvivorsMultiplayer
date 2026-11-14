@@ -3,6 +3,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
-  <ItemGroup><ProjectReference Include="../Wsm.Lobby/Wsm.Lobby.csproj" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="../Wsm.Lobby/Wsm.Lobby.csproj" /><ProjectReference Include="../Wsm.Launcher/Wsm.Launcher.csproj" /></ItemGroup>
 </Project>

@@ -20,6 +20,10 @@ public sealed class LobbyForm : Form
     private readonly ComboBox dropLayout = Choice("ExperienceDropLayout", "Gleiche Positionen", "Persönliche Positionen");
     private readonly ComboBox pickupSharing = Choice("PickupSharing", "Persönlich", "Münzen und Verbrauchsgegenstände fürs Team");
     private readonly Label appliedRules = Label("AppliedRules", "Noch keine Host-Regeln bestätigt.");
+    private readonly Button launchGame = Button("LaunchGame", "Spiel separat starten (experimentell)");
+    internal event EventHandler? LaunchGameRequested;
+    internal Func<Task<bool>>? BeforeClose;
+    internal void SetGameLaunchEnabled(bool enabled) => launchGame.Enabled = enabled;
     private readonly Button host = Button("Host", "Lobby erstellen");
     private readonly Button join = Button("Join", "Beitreten");
     private readonly Button leave = Button("Leave", "Verlassen / trennen");
@@ -49,7 +53,8 @@ public sealed class LobbyForm : Form
         var layout = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 0, Padding = new Padding(12) };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 205)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         Controls.Add(scroll); scroll.Controls.Add(layout);
-        AddWide(layout, Label("Development", "Entwicklungsstand: Spielanbindung fehlt. Start ist derzeit nicht möglich."));
+        AddWide(layout, Flow(launchGame));
+        AddWide(layout, Label("Development", "Entwicklungsstand: Kein Koop-Gameplay; nur separater Spielstart."));
         AddWide(layout, Label("Security", "Nur vertrauenswürdiges LAN/VPN: HTTP unverschlüsselt, kein Passwort; nicht öffentlich freigeben. Keine Firewall-Änderungen."));
         AddRow(layout, "Spielername", playerName); AddRow(layout, "Host-Bindung", bind); AddRow(layout, "IP-Adresse des Hosts", ip); AddRow(layout, "Port", port);
         AddWide(layout, Flow(host, join, leave)); AddWide(layout, address);
@@ -61,6 +66,7 @@ public sealed class LobbyForm : Form
         AddWide(layout, Flow(rules, start)); AddWide(layout, appliedRules); AddWide(layout, Label("RosterLabel", "Lobby-Teilnehmer"));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 140)); layout.Controls.Add(roster, 0, layout.RowCount); layout.SetColumnSpan(roster, 2); layout.RowCount++;
         AddWide(layout, status);
+        launchGame.Click += (_, _) => LaunchGameRequested?.Invoke(this, EventArgs.Empty);
         host.Click += async (_, _) => await ExecuteAsync(CreateAsync);
         join.Click += async (_, _) => await ExecuteAsync(JoinAsync, connecting: true);
         leave.Click += async (_, _) => await ExecuteAsync(DisconnectAsync);
@@ -230,7 +236,13 @@ public sealed class LobbyForm : Form
     {
         e.Cancel = true;
         if (closing) return;
-        closing = true; lifetime.Cancel(); UpdateControls();
+        closing = true; UpdateControls();
+        try
+        {
+            if (BeforeClose is not null && !await BeforeClose()) { closing = false; UpdateControls(); return; }
+        }
+        catch (Exception ex) { status.Text = "Fehler beim Schließen: " + ex.Message; closing = false; UpdateControls(); return; }
+        lifetime.Cancel();
         try { if (polling is not null) await polling; await gate.WaitAsync(); try { await DisconnectAsync(CancellationToken.None); } finally { gate.Release(); } }
         catch (Exception ex) { status.Text = "Fehler beim Schließen: " + ex.Message; }
         finally { lifetime.Dispose(); gate.Dispose(); FormClosing -= OnClosing; Close(); }

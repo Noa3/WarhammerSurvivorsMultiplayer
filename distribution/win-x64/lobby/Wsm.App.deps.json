@@ -9,6 +9,7 @@
     ".NETCoreApp,Version=v10.0/win-x64": {
       "Wsm.App/1.0.0": {
         "dependencies": {
+          "Wsm.Launcher": "1.0.0",
           "Wsm.Lobby": "1.0.0",
           "runtimepack.Microsoft.NETCore.App.Runtime.win-x64": "10.0.12",
           "runtimepack.Microsoft.WindowsDesktop.App.Runtime.win-x64": "10.0.12",
@@ -1438,6 +1439,14 @@
           }
         }
       },
+      "Wsm.Launcher/1.0.0": {
+        "runtime": {
+          "Wsm.Launcher.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
       "Wsm.Lobby/1.0.0": {
         "dependencies": {
           "Wsm.Contracts": "1.0.0"
@@ -1473,6 +1482,11 @@
       "sha512": ""
     },
     "Wsm.Contracts/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Wsm.Launcher/1.0.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""
