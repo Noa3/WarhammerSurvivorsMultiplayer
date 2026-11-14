@@ -101,6 +101,29 @@ reentrancy boundary are not proven safe against arbitrary changes.
 changes or persistence. The game can persist configuration changed in memory;
 absence of direct savefile writes does not establish unchanged saves.
 
+## Order-dependent primary hero initialization
+
+For the exercised version, a matching `selectedTypes` list is not sufficient
+to establish the primary actor's hero. In the controlled test, the primary
+actor followed the stock menu's last confirmed scalar choice, while the added
+actor followed its copied selection. Copying a primary dictionary entry does
+not also restore the scalar menu choice.
+
+For the observed baseline IDs zero and one, the successful sequence was:
+
+1. Establish the outside-run phase and enroll the configured additional player.
+2. Confirm that additional player's available hero in the stock menu, then
+   submit `copy:<pid>:1`.
+3. Confirm the primary player's available hero **last** through the stock UI,
+   then submit `copy:<pid>:0` without another hero change before stage start.
+4. Start the stage normally and compare both actual actor types with the
+   requested choices; do not infer success from the menu response alone.
+
+These IDs describe the measured baseline, not a general identity/index mapping.
+The adapter does not provide an automatic host-start or hero-selection screen.
+This ordering establishes distinct local heroes only; it does not repair the
+upgrade failure below or enable network gameplay.
+
 ## Verified behavior and remaining failures
 
 In a single owned game instance, menu enrollment and exact rollback were observed.
@@ -109,14 +132,24 @@ player remained selected were also exercised. Ordinary keyboard confirmation
 can reselect player zero; selecting a menu player does not by itself assign
 that player's hero.
 
-Copying distinct bought choices produced menu selections `[5012,5001]` and the
-normal stage start created two actual main characters with input IDs zero and
-one and different HP. This did **not** complete personal hero selection: both
-actual character types were `5001`. Both advanced to level two with equal XP,
-and the first upgrade displayed no choices with a `NullReferenceException` in
-`WSLevelUpPage.CanCharacterReceivePass`. A direction pulse overlapped that modal,
-so independent movement was not established. The owned game closed normally;
-no roster mutation was attempted inside the failed upgrade state.
+An initial preparation copied distinct bought choices into menu selections
+`[5012,5001]`, but left the stock scalar choice at `5001`. The normal stage
+start created two actual main characters with input IDs zero and one and
+different HP, but both actual character types were `5001`.
+
+A subsequent single-instance control retained the exact same bridge bytes and
+changed the confirmation order only: copy additional player `5001` first,
+confirm primary `5012` last, then copy the primary entry. Both the level-one and
+level-two observations then contained actual actor types `[5012,5001]`, matching
+the requested distinct heroes. No generator patch or forced spawn was needed.
+
+The first upgrade still displayed no choices with a `NullReferenceException`
+in `WSLevelUpPage.CanCharacterReceivePass`, and both actors reached level two
+with equal XP. Distinct local heroes therefore do not resolve the upgrade or
+personal-progress boundaries. Independent movement was not measured in the
+order-control run; a direction pulse in the earlier run overlapped the upgrade
+modal and was inconclusive. Both owned games closed normally; no roster mutation
+was attempted inside either failed upgrade state.
 
 These observations do not prove synchronized worlds across machines, virtual
 input, personal XP/upgrades, death/spectating, reconnect or save invariance.
