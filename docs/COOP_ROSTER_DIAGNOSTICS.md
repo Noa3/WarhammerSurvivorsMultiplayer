@@ -96,14 +96,31 @@ Both statuses suppress old actor/context values. A captured result reports:
   outside that list;
 - each actor's slot, input ID, character type and weapons-manager,
   accessories-manager and accessories-collection reference presence.
+- the page's choice-container group/list presence and ordered managed-reference
+  presence for at most eight container entries. Missing group, null list and
+  present empty list are reported distinctly. Counts outside that bound refuse
+  the entire capture rather than silently truncating it.
 
-Session/collection properties are inspected through verified backing fields,
-not by invoking their getters. **Presence means a rooted managed reference,
+Session/equipment properties and the choice-group list are inspected through
+verified fields, not their game getters. The concrete framework
+`List<Transform>.get_Count/get_Item` accessors read container references;
+`UIGroup.GetActiveItem`, Transform children and component active-state APIs are
+not invoked. **Presence means a rooted managed reference,
 not Unity native-object liveness**, valid contents or a cause of the upgrade
-exception. No collection element is read. The normal previously approved scene
+exception. No equipment element is read. Container reference presence does not
+establish an active, live selection or correct card components. The normal previously approved scene
 getters are still involved; this is not a proof of their purity or an atomic
 engine snapshot. `actionSucceeded` for this command means context capture, not
 that every other observation succeeded or the upgrade became playable.
+
+In a target-game capture on version 2.1.6, the first failed two-hero upgrade
+reported a present choice group and list with three ordered references
+`[false, false, true]`. The preceding ordinary Level-1 pause reported the
+optional context as `not_ready`. This validates the structural reader in that
+flow, not the upgrade: choices remained empty and `CanCharacterReceivePass`
+still threw. A missing group, null list or empty list was not observed at that
+post-exception snapshot; active selection, native liveness, child components
+and the exact throw-time operand remain unverified.
 
 ## Mutation boundaries
 

@@ -8,7 +8,9 @@ EXPECTED_CASES = {"no_manager", "null_stage", "empty_players", "two_players", "p
                   "upgrade_missing_page", "upgrade_second_actor", "upgrade_null_session", "upgrade_null_active",
                   "upgrade_foreign_active", "upgrade_null_collection", "upgrade_null_factory", "upgrade_duplicate_pages",
                   "upgrade_wrong_thread", "upgrade_stopped", "upgrade_late_error", "upgrade_stage_root_failure",
-                  "upgrade_recovered", "upgrade_no_manager", "upgrade_duplicate_actor", "upgrade_wrong_collection_type"}
+                  "upgrade_recovered", "upgrade_no_manager", "upgrade_duplicate_actor", "upgrade_wrong_collection_type",
+                  "upgrade_choice_group_entries", "upgrade_choice_null_list", "upgrade_choice_empty_list",
+                  "upgrade_choice_at_bound", "upgrade_choice_over_bound"}
 root=os.path.abspath(os.path.join(os.path.dirname(__file__),"..",".."))
 local=os.path.join(root,".local")
 player=os.environ.get("WSM_PLAYER_STATE_PLAYER","player-state-v1-player4")

@@ -55,13 +55,17 @@ extern "C" __declspec(dllexport) int __cdecl fixture_upgrade(int managed, unsign
     snapshot.level_up_page_count=-44; snapshot.page_game_session_present=true;
     snapshot.active_character_present=true; snapshot.level_up_factory_present=false; snapshot.active_character_slot=99;
     snapshot.actors={{-4,88,-7,true,false,true},{-8,89,-9,false,true,false}};
+    snapshot.choice_group_present=true;snapshot.choice_group_items_present=false;
+    snapshot.choice_group_item_references={true,false,true};
     const auto before=snapshot;
     const auto unchanged=[&] {
         if(snapshot.level_up_page_count!=before.level_up_page_count ||
            snapshot.page_game_session_present!=before.page_game_session_present ||
            snapshot.active_character_present!=before.active_character_present ||
            snapshot.level_up_factory_present!=before.level_up_factory_present ||
-           snapshot.active_character_slot!=before.active_character_slot || snapshot.actors.size()!=before.actors.size())return false;
+           snapshot.active_character_slot!=before.active_character_slot || snapshot.actors.size()!=before.actors.size() ||
+           snapshot.choice_group_present!=before.choice_group_present || snapshot.choice_group_items_present!=before.choice_group_items_present ||
+           snapshot.choice_group_item_references!=before.choice_group_item_references)return false;
         for(std::size_t i=0;i<before.actors.size();++i) {
             const auto &a=snapshot.actors[i], &b=before.actors[i];
             if(a.slot!=b.slot || a.input_id!=b.input_id || a.character_type!=b.character_type ||
@@ -75,9 +79,10 @@ extern "C" __declspec(dllexport) int __cdecl fixture_upgrade(int managed, unsign
         if(status==wsm::PlayerReadStatus::NotReady && error.empty() && unchanged())return 0;
         note("upgrade_not_ready",error,static_cast<int>(status)); return 22;
     }
-    if(mode==7 || mode==8 || mode==10 || mode==11 || mode==13 || mode==14) {
+    if(mode==7 || mode==8 || mode==10 || mode==11 || mode==13 || mode==14 || mode==19) {
         if(status==wsm::PlayerReadStatus::Error && !error.empty() && unchanged() &&
-           (mode!=14 || error=="ActiveEquipment must be List of canonical Equipment"))return 0;
+           (mode!=14 || error=="ActiveEquipment must be List of canonical Equipment") &&
+           (mode!=19 || error=="Choice container item count outside supported bound"))return 0;
         note("upgrade_error",error,static_cast<int>(status)); return 23;
     }
     if(status!=wsm::PlayerReadStatus::Captured || !error.empty()) { note("upgrade_capture",error,static_cast<int>(status)); return 24; }
@@ -87,6 +92,11 @@ extern "C" __declspec(dllexport) int __cdecl fixture_upgrade(int managed, unsign
        snapshot.active_character_present!=active || snapshot.level_up_factory_present!=factory ||
        snapshot.active_character_slot!=slot || snapshot.actors.size()!=2) { note("upgrade_context_values",error,25); return 25; }
     const auto &a=snapshot.actors[0], &b=snapshot.actors[1];
+    const bool group_present=mode>=15 && mode<=18, items_present=group_present && mode!=16;
+    const auto entries=mode==15?std::vector<bool>{false,true}:mode==18?std::vector<bool>{false,true,false,true,false,true,false,true}:std::vector<bool>{};
+    if(snapshot.choice_group_present!=group_present || snapshot.choice_group_items_present!=items_present || snapshot.choice_group_item_references!=entries) {
+        note("upgrade_choice_group_values",error,27);return 27;
+    }
     if(a.slot!=0 || a.input_id!=41 || a.character_type!=3 || !a.weapons_manager_present || a.accessories_manager_present || a.accessories_collection_present ||
        b.slot!=1 || b.input_id!=52 || b.character_type!=4 || b.weapons_manager_present || !b.accessories_manager_present || b.accessories_collection_present!=(mode!=5)) {
         note("upgrade_actor_values",error,26);return 26;

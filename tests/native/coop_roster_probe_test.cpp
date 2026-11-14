@@ -50,8 +50,13 @@ int main(int argc, char** argv) {
     c.upgrade.level_up_page_count=1;c.upgrade.page_game_session_present=true;c.upgrade.active_character_present=true;
     c.upgrade.active_character_slot=1;c.upgrade.level_up_factory_present=true;
     c.upgrade.actors={{0,41,37,true,false,false},{1,52,91,false,true,true}};
+    c.upgrade.choice_group_present=true;c.upgrade.choice_group_items_present=true;
+    c.upgrade.choice_group_item_references={false,true};
     auto context_json=result_json(c,4);
     check("captured upgrade query serializes reference identity", context_json.find("\"activeCharacterSlot\":1")!=std::string::npos && context_json.find("\"inputId\":52")!=std::string::npos);
+    check("captured upgrade query serializes choice group structure", context_json.find("\"choiceContainerGroupReferencePresent\":true")!=std::string::npos &&
+          context_json.find("\"choiceContainerItemsReferencePresent\":true")!=std::string::npos &&
+          context_json.find("\"choiceContainerItemReferences\":[false,true]")!=std::string::npos);
     std::cout << "ROSTER_UPGRADE_JSON " << context_json << '\n';
     c.upgrade_status=PlayerReadStatus::Error;context_json=result_json(c,5);
     check("upgrade error suppresses stale context", context_json.find("\"upgradeContext\":{\"state\":\"error\",\"actors\":[]}")!=std::string::npos);

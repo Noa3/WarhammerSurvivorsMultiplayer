@@ -25,10 +25,18 @@ namespace VampireSurvivors.Framework
 }
 namespace Wilson.UI
 {
+    [Preserve] public class UIGroup<T> where T : Component
+    {
+        [Preserve] protected List<T> items;
+        public UIGroup(IEnumerable<T> values) { items = new List<T>(values); }
+        public void ConfigureItems(List<T> values) { items = values; }
+    }
     [Preserve] public class WSLevelUpPage : MonoBehaviour
     {
         [Preserve] private VampireSurvivors.Framework.GameSessionData _gameSession;
         [Preserve] private VampireSurvivors.Framework.LevelUpFactory _levelUpFactory;
+        [Preserve] private UIGroup<Transform> _ChoiceContainerGroup;
+        public void ConfigureChoiceGroup(UIGroup<Transform> group) { _ChoiceContainerGroup = group; }
         public void Configure(VampireSurvivors.Framework.GameSessionData session,
                               VampireSurvivors.Framework.LevelUpFactory factory)
         {

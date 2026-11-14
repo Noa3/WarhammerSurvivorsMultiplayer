@@ -24,6 +24,8 @@ context = contexts[0]['upgradeContext']
 assert context == {
     'state': 'captured', 'levelUpPageCount': 1, 'gameSessionReferencePresent': True,
     'activeCharacterReferencePresent': True, 'activeCharacterSlot': 1, 'levelUpFactoryReferencePresent': True,
+    'choiceContainerGroupReferencePresent': True, 'choiceContainerItemsReferencePresent': True,
+    'choiceContainerItemReferences': [False, True],
     'actors': [
         {'slot': 0, 'inputId': 41, 'characterType': 37, 'weaponsManagerReferencePresent': True,
          'accessoriesManagerReferencePresent': False, 'accessoriesCollectionReferencePresent': False},

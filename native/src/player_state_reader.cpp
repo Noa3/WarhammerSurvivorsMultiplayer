@@ -273,6 +273,23 @@ PlayerReadStatus PlayerStateReader::read_upgrade_context(UpgradeContextSnapshot&
        reference_field(equipment_class,collection_name,collection_class)!=collection_field ||
        !weapons_field||!accessories_field||!session_field||!factory_field||!active_field)
         return fail("Invalid upgrade-context reference field metadata");
+    auto transform_class=p.klass(p.domain,"UnityEngine.CoreModule.dll","UnityEngine","Transform");
+    auto group_field=p.field_by_name(page_class,"_ChoiceContainerGroup");
+    auto group_class=group_field?p.class_from_type(p.field_type(group_field)):nullptr;
+    if(!transform_class || !group_class || !p.type(p.field_type(group_field),"Wilson.UI.UIGroup<UnityEngine.Transform>") ||
+       !p.image_for_class(group_class,"VampireSurvivors.Runtime.dll") || !eq(p.a.class_get_namespace(group_class),"Wilson.UI") ||
+       !eq(p.a.class_get_name(group_class),"UIGroup`1") || reference_field(page_class,"_ChoiceContainerGroup",group_class)!=group_field)
+        return fail("Invalid choice container group metadata");
+    auto group_items_field=p.field_by_name(group_class,"items");
+    auto group_items_class=group_items_field?p.class_from_type(p.field_type(group_items_field)):nullptr;
+    auto group_count=p.method(group_items_class,"get_Count","System.Int32");
+    auto group_item=p.method(group_items_class,"get_Item","UnityEngine.Transform","System.Int32");
+    if(!group_items_class || !p.type(p.field_type(group_items_field),"System.Collections.Generic.List<UnityEngine.Transform>") ||
+       !p.image_for_class(group_items_class,"mscorlib.dll") || !eq(p.a.class_get_namespace(group_items_class),"System.Collections.Generic") ||
+       !eq(p.a.class_get_name(group_items_class),"List`1") || reference_field(group_class,"items",group_items_class)!=group_items_field ||
+       !group_count || !p.result_image(group_item,"UnityEngine.Transform","UnityEngine.CoreModule.dll","UnityEngine","Transform") ||
+       p.class_from_type(p.a.method_get_return_type(group_item))!=transform_class)
+        return fail("Invalid choice container items metadata");
     const auto read_ref=[&](Il2CppObject* owner,FieldInfo* field,Il2CppClass* expected,std::unique_ptr<Impl::Root>& root)->bool {
         if(!p.is_a(owner,p.field_parent(field))){error="Unexpected diagnostic field owner";return false;}
         Il2CppObject* raw=nullptr;p.field_value(owner,field,&raw);
@@ -282,6 +299,25 @@ PlayerReadStatus PlayerStateReader::read_upgrade_context(UpgradeContextSnapshot&
     };
     UpgradeContextSnapshot result;std::unique_ptr<Impl::Root> page;
     status=find_one(page_class,page,result.level_up_page_count);if(status!=PlayerReadStatus::Captured)return status;
+    std::unique_ptr<Impl::Root> group,group_items;
+    if(!read_ref(page->get(),group_field,group_class,group))return PlayerReadStatus::Error;
+    result.choice_group_present=group->get()!=nullptr;
+    if(result.choice_group_present) {
+        if(!read_ref(group->get(),group_items_field,group_items_class,group_items))return PlayerReadStatus::Error;
+        result.choice_group_items_present=group_items->get()!=nullptr;
+        if(result.choice_group_items_present) {
+            std::int32_t size=0;
+            if(!p.integer32(p.invoke(group_count,group_items->get(),nullptr,error),size,error))return PlayerReadStatus::Error;
+            if(size<0||size>8)return fail("Choice container item count outside supported bound");
+            for(std::int32_t i=0;i<size;++i) {
+                void* index[]={&i};auto raw=p.invoke(group_item,group_items->get(),index,error);
+                if(!error.empty())return PlayerReadStatus::Error;
+                Impl::Root item(p,raw);
+                if(raw && !p.is_a(item.get(),transform_class))return fail("Unable to root expected choice container reference");
+                result.choice_group_item_references.push_back(item.get()!=nullptr);
+            }
+        }
+    }
     auto raw_list=p.invoke(p.players,manager->get(),nullptr,error);
     if(!error.empty())return PlayerReadStatus::Error;
     if(!raw_list)return PlayerReadStatus::NotReady;

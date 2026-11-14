@@ -39,12 +39,13 @@ python tests/UnityPlayerStateFixture/run_fixture.py
 
 `run_fixture.py` runs the player headless with `-batchmode -nographics` (window
 never activated, no input touched) and needs both exit code 0 and the driver's
-`PLAYER_TEST RESULT failures=0` line plus exactly one passing occurrence of each
-of every named case in `EXPECTED_CASES`, including the 17 baseline scene cases
+`PLAYER_TEST RESULT failures=0` line plus exactly one passing occurrence of
+every named case in `EXPECTED_CASES`, including the 17 baseline scene cases
 and the upgrade-context cases below, so an early exit or changed case membership
 cannot look green. It defaults to
-`.local/player-state-v1-player4` (the build matching the current sources);
-override with `WSM_PLAYER_STATE_PLAYER`. The editor run is headless and writes
+`.local/player-state-v1-player4`, the output path in the example above. Rebuild
+that player from the current sources before running it, or choose a fresh path
+and override `WSM_PLAYER_STATE_PLAYER`. The editor run is headless and writes
 only into `.local/` (`player-state-v1-*`); check `PLAYER_FIXTURE_BUILD=Succeeded`
 in the build log, not only the editor exit code.
 
@@ -108,7 +109,20 @@ These are managed-reference observations, not Unity native-object liveness.
 to an actual fixture `List<Int32>` field on the same canonical equipment manager.
 It requires metadata refusal rather than accepting another `List<T>`. No runtime
 metadata is patched, and this field-redirection seam is absent from the
-production bridge. Collection elements are never read by the diagnostic.
+production bridge. Equipment elements are never read by the diagnostic.
+
+The choice-container cases use the original fixture's `Wilson.UI.UIGroup<T>`
+with a protected `List<T> items` and the page's typed `_ChoiceContainerGroup`
+field. They distinguish the usual absent group from a null list and an empty
+list, preserve ordered `[false, true]` managed-reference presence, accept eight
+entries, and reject nine with the exact bounded-count error. Every failure
+oracle also compares the seeded group/list flags and entry vector. The reader
+checks the closed `UIGroup<Transform>` / `List<Transform>` metadata and canonical
+Transform return identity before using the framework list accessors.
+
+These checks do not call `UIGroup.GetActiveItem`, native liveness/active-state
+APIs, Transform child enumeration or component queries. A present container
+reference does not establish an active selection or valid upgrade-card contents.
 
 The reader trusts the inspected runtime's provenance. It resolves named contracts
 and checks important class/image identities, but is not an admission boundary for

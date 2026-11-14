@@ -218,7 +218,15 @@ std::string result_json(const ProbeContext& c, unsigned sample) {
             << ",\"gameSessionReferencePresent\":" << (c.upgrade.page_game_session_present?"true":"false")
             << ",\"activeCharacterReferencePresent\":" << (c.upgrade.active_character_present?"true":"false")
             << ",\"activeCharacterSlot\":" << c.upgrade.active_character_slot
-            << ",\"levelUpFactoryReferencePresent\":" << (c.upgrade.level_up_factory_present?"true":"false");
+            << ",\"levelUpFactoryReferencePresent\":" << (c.upgrade.level_up_factory_present?"true":"false")
+            << ",\"choiceContainerGroupReferencePresent\":" << (c.upgrade.choice_group_present?"true":"false")
+            << ",\"choiceContainerItemsReferencePresent\":" << (c.upgrade.choice_group_items_present?"true":"false")
+            << ",\"choiceContainerItemReferences\":[";
+        for(std::size_t i=0;i<c.upgrade.choice_group_item_references.size();++i) {
+            if(i)out << ',';
+            out << (c.upgrade.choice_group_item_references[i]?"true":"false");
+        }
+        out << ']';
     }
     out << ",\"actors\":[";
     if(captured)for(std::size_t i=0;i<c.upgrade.actors.size();++i) {

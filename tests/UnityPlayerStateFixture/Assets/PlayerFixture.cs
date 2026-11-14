@@ -58,6 +58,13 @@ public sealed class PlayerFixture : MonoBehaviour {
   Check("upgrade_stage_root_failure",fixture_upgrade(managed,os,11));
   var second=gm.players[1];gm.players[1]=gm.players[0];Check("upgrade_duplicate_actor",fixture_upgrade(managed,os,13));gm.players[1]=second;
   Check("upgrade_recovered",fixture_upgrade(managed,os,0));
+  var group=new Wilson.UI.UIGroup<Transform>(new Transform[] { null, page.transform });page.ConfigureChoiceGroup(group);
+  Check("upgrade_choice_group_entries",fixture_upgrade(managed,os,15));
+  group.ConfigureItems(null);Check("upgrade_choice_null_list",fixture_upgrade(managed,os,16));
+  group.ConfigureItems(new System.Collections.Generic.List<Transform>());Check("upgrade_choice_empty_list",fixture_upgrade(managed,os,17));
+  group.ConfigureItems(new System.Collections.Generic.List<Transform> { null,page.transform,null,page.transform,null,page.transform,null,page.transform });
+  Check("upgrade_choice_at_bound",fixture_upgrade(managed,os,18));
+  group.ConfigureItems(new System.Collections.Generic.List<Transform>(new Transform[9]));Check("upgrade_choice_over_bound",fixture_upgrade(managed,os,19));page.ConfigureChoiceGroup(null);
   DestroyImmediate(gm.gameObject);Check("upgrade_no_manager",fixture_upgrade(managed,os,12));
  }
 }

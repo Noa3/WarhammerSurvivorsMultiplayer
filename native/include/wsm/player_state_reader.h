@@ -21,6 +21,9 @@ struct UpgradeContextSnapshot {
     bool page_game_session_present = false, active_character_present = false, level_up_factory_present = false;
     // -1: no active reference; -2: reference outside MainPlayers; otherwise exact actor slot.
     std::int32_t active_character_slot = -1;
+    bool choice_group_present = false, choice_group_items_present = false;
+    // Managed reference presence only; neither active state nor Unity native liveness.
+    std::vector<bool> choice_group_item_references;
 };
 enum class PlayerReadStatus { Captured, NotReady, Error };
 // Metadata is borrowed for the runtime lifetime. The expected IDs must be
