@@ -75,7 +75,7 @@ int advanced_test(HINSTANCE instance, const wchar_t* class_name) {
     PostMessageW(other, wake, nonce, 0);
     ok = ok && PeekMessageW(&msg, other, wake, wake, PM_REMOVE) != FALSE && second == 0;
     const auto overlap = wsm::run_window_hook(instance, window_handle, owner_thread, counted, &first, 1);
-    ok = ok && overlap == wsm::HookResult::failed;
+    ok = ok && overlap == wsm::HookResult::busy;
     ok = finish_call(worker, retry) && ok && retry.result == wsm::HookResult::completed && first == 0 && second == 1;
     if (!ok) { std::puts("FAIL: stale/noise/PM_NOREMOVE/window filter or overlapping invocation"); return 1; }
 

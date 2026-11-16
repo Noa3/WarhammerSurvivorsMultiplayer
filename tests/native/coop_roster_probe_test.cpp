@@ -4,12 +4,107 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <thread>
 
+namespace {
+struct TeardownFixture {
+    HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HANDLE entered = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HANDLE release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HANDLE finished = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HANDLE started = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HWND window = nullptr;
+    DWORD owner = 0;
+    wsm::ProbeContext* expected = nullptr;
+    std::atomic<int> calls{0};
+    std::atomic<bool> resource_owned{true}, correct_context{false}, correct_thread{false};
+};
+TeardownFixture* teardown_fixture = nullptr;
+LRESULT CALLBACK teardown_window_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
+    if (message == WM_CLOSE) { DestroyWindow(window); return 0; }
+    if (message == WM_DESTROY) { PostQuitMessage(0); return 0; }
+    return DefWindowProcW(window, message, wp, lp);
+}
+void hold_teardown_admission(void* data) {
+    auto& f = *static_cast<TeardownFixture*>(data);
+    SetEvent(f.entered);
+    WaitForSingleObject(f.release, 5000);
+}
+void simulated_teardown_failure(void* data) {
+    auto& f = *teardown_fixture;
+    ++f.calls;
+    static_cast<wsm::ProbeContext*>(data)->action_succeeded = false;
+}
+void simulated_teardown(void* data) {
+    auto& f = *teardown_fixture;
+    f.correct_context = data == f.expected;
+    f.correct_thread = GetCurrentThreadId() == f.owner;
+    ++f.calls;
+    f.resource_owned = false;
+    static_cast<wsm::ProbeContext*>(data)->action_succeeded = true;
+}
+
+int dispatch_hook_calls = 0;
+wsm::HookResult dispatch_injected = wsm::HookResult::failed;
+wsm::HookResult unavailable_dispatch(HMODULE, HWND, DWORD, void (*)(void*), void*, DWORD) {
+    ++dispatch_hook_calls;
+    return dispatch_injected;
+}
+}
 int main(int argc, char** argv) {
     if (argc != 2) return 2;
     int failed = 0, count = 0;
     auto check = [&](const char* name, bool ok) { ++count; if (!ok) ++failed; std::cout << (ok ? "PASS " : "FAIL ") << name << '\n'; };
     using namespace wsm;
+    {
+        TeardownFixture f;
+        if (!f.ready || !f.entered || !f.release || !f.finished || !f.started) return 2;
+        teardown_fixture = &f;
+        std::thread target([&] {
+            f.owner = GetCurrentThreadId();
+            WNDCLASSW cls{}; cls.hInstance = GetModuleHandleW(nullptr); cls.lpfnWndProc = teardown_window_proc;
+            cls.lpszClassName = L"WSMRosterTeardownFixture";
+            if (RegisterClassW(&cls)) f.window = CreateWindowW(cls.lpszClassName, L"fixture", WS_OVERLAPPED, 0, 0, 100, 100, nullptr, nullptr, cls.hInstance, nullptr);
+            SetEvent(f.ready);
+            if (f.window) { MSG msg{}; while (GetMessageW(&msg, nullptr, 0, 0) > 0) DispatchMessageW(&msg); }
+        });
+        if (WaitForSingleObject(f.ready, 5000) != WAIT_OBJECT_0 || !f.window) { target.join(); return 2; }
+        ProbeContext owned; owned.window.hwnd = f.window; owned.window.thread = f.owner;
+        f.expected = &owned;
+        const auto module = GetModuleHandleW(nullptr);
+        HookResult first = HookResult::failed;
+        std::thread blocker([&] { first = run_window_hook(module, f.window, f.owner, hold_teardown_admission, &f, 3000); });
+        const bool held = WaitForSingleObject(f.entered, 4000) == WAIT_OBJECT_0;
+        check("teardown fixture holds real global hook", held && run_window_hook(module, f.window, f.owner, simulated_teardown, &owned, 20) == HookResult::busy);
+        const auto expired = dispatch_roster_teardown(module, owned, simulated_teardown, 80);
+        check("teardown busy deadline retains owned context and resource", expired == HookResult::busy && f.calls == 0 && f.resource_owned && !owned.action_succeeded);
+        HookResult result = HookResult::failed;
+        std::thread cleanup([&] { SetEvent(f.started); result = dispatch_roster_teardown(module, owned, simulated_teardown); SetEvent(f.finished); });
+        const bool started = WaitForSingleObject(f.started, 2000) == WAIT_OBJECT_0;
+        const bool waiting = started && WaitForSingleObject(f.finished, 150) == WAIT_TIMEOUT;
+        check("teardown waits while real hook is busy", waiting && f.calls == 0 && f.resource_owned && !owned.action_succeeded);
+        SetEvent(f.release);
+        cleanup.join(); blocker.join();
+        check("teardown completes once on owner with retained context", first == HookResult::completed && result == HookResult::completed &&
+              f.calls == 1 && f.correct_context && f.correct_thread && !f.resource_owned && owned.action_succeeded);
+        f.calls = 0; f.resource_owned = true; owned.action_succeeded = false;
+        const auto invalid = dispatch_roster_teardown(nullptr, owned, simulated_teardown);
+        check("teardown invalid hook retains owner without success", invalid == HookResult::failed && f.calls == 0 && f.resource_owned && !owned.action_succeeded);
+        const auto close_failure = dispatch_roster_teardown(module, owned, simulated_teardown_failure);
+        check("completed hook does not imply cleanup succeeded", close_failure == HookResult::completed && f.calls == 1 && f.resource_owned && !owned.action_succeeded);
+        HWND idle = CreateWindowW(L"WSMRosterTeardownFixture", L"idle", WS_OVERLAPPED, 0, 0, 100, 100, nullptr, nullptr, module, nullptr);
+        ProbeContext idle_context; idle_context.window.hwnd = idle; idle_context.window.thread = GetCurrentThreadId();
+        f.expected = &idle_context; f.calls = 0;
+        HookResult timeout = HookResult::failed;
+        std::thread no_pump([&] { timeout = dispatch_roster_teardown(module, idle_context, simulated_teardown, 80); });
+        no_pump.join();
+        MSG pending{}; while (PeekMessageW(&pending, idle, 0, 0, PM_REMOVE)) DispatchMessageW(&pending);
+        check("teardown timeout retains owner and prevents late callback", idle && timeout == HookResult::timeout && f.calls == 0 && f.resource_owned && !idle_context.action_succeeded);
+        if (idle) DestroyWindow(idle);
+        PostMessageW(f.window, WM_CLOSE, 0, 0); target.join();
+        CloseHandle(f.ready); CloseHandle(f.entered); CloseHandle(f.release); CloseHandle(f.finished); CloseHandle(f.started);
+        teardown_fixture = nullptr;
+    }
     RosterCommand command;
     wchar_t previous_hook_flag[128]{};
     const DWORD previous_hook_length=GetEnvironmentVariableW(L"WSM_UPGRADE_PASS_HOOK_OPT_IN",previous_hook_flag,128);
@@ -20,6 +115,63 @@ int main(int argc, char** argv) {
     check("extended upgrade permission refused",SetEnvironmentVariableW(L"WSM_UPGRADE_PASS_HOOK_OPT_IN",L"1 ")&&!upgrade_hook_opt_in());
     check("restore process-local test flag",SetEnvironmentVariableW(L"WSM_UPGRADE_PASS_HOOK_OPT_IN",previous_hook_length?previous_hook_flag:nullptr)!=FALSE);
     check("inspect command", parse_command("inspect\r\n", 1234, command) && command.action == RosterAction::inspect);
+    check("neutral input watch start route", parse_command("inputWatchStart:1234", 1234, command));
+    check("neutral input watch state route", parse_command("inputWatchState:1234", 1234, command));
+    check("neutral input watch stop route", parse_command("inputWatchStop:1234", 1234, command));
+    for (const auto* bad : {"inputWatchStart:1235", "inputWatchState:1234:extra", "inputWatchStop:-1234", "inputWatchStart:1234\ninspect"})
+        check("neutral input watch refuses malformed identity", !parse_command(bad, 1234, command));
+    {
+        wchar_t previous[128]{};
+        const DWORD length = GetEnvironmentVariableW(L"WSM_INPUT_PUMP_OBSERVATION_OPT_IN", previous, 128);
+        if (length >= 128) return 1;
+        for (const auto* flag : {static_cast<const wchar_t*>(nullptr), L"true", L"01", L"1 "}) {
+            check("set nonexact input-watch permission", SetEnvironmentVariableW(L"WSM_INPUT_PUMP_OBSERVATION_OPT_IN", flag) != FALSE);
+            ProbeContext denied; denied.command.action = RosterAction::input_watch_start;
+            execute_command(&denied);
+            check("input watch subscription refused before runtime", !denied.action_succeeded && !denied.input_pump &&
+                  denied.action_error == "Input event observation requires separate WSM_INPUT_PUMP_OBSERVATION_OPT_IN=1");
+        }
+        check("exact input-watch permission", SetEnvironmentVariableW(L"WSM_INPUT_PUMP_OBSERVATION_OPT_IN", L"1") && input_watch_opt_in());
+        ProbeContext guard; guard.command.action = RosterAction::input_watch_start;
+        execute_command(&guard);
+        check("input watch cannot bypass main-thread proof", !guard.action_succeeded && !guard.input_pump && guard.action_error == "Native OS thread mismatch.");
+        for (const auto action : {RosterAction::input_watch_state, RosterAction::input_watch_stop}) {
+            ProbeContext data; data.command.action = action;
+            execute_command(&data);
+            const auto json = result_json(data, 1);
+            check("input watch absent status and stop are data-only", data.action_succeeded && !data.input_watch_captured && !data.input_pump && data.action_error.empty());
+            check("input watch never claims control or ordering", json.find("\"inputEventWatch\":{\"stateCaptured\":false,\"nonzeroEnabled\":false,\"consumerOrderingProven\":false}") != std::string::npos);
+        }
+        ProbeContext view; view.command.action = RosterAction::input_watch_state; view.input_watch_captured = true;
+        view.input_watch_state.input_updates = (std::numeric_limits<std::uint64_t>::max)();
+        view.input_watch_state.recovery_updates = 42; view.input_watch_state.error = "quoted \"diagnostic\"";
+        const auto json = result_json(view, 1);
+        check("input watch serializes exact data snapshot", json.find("\"inputUpdates\":\"18446744073709551615\"") != std::string::npos && json.find("\"recoveryUpdates\":\"42\"") != std::string::npos && json.find("quoted \\\"diagnostic\\\"") != std::string::npos);
+        view.input_watch_captured = false;
+        check("input watch unavailable suppresses stale counters", result_json(view, 2).find("inputUpdates") == std::string::npos);
+        check("restore input-watch permission", SetEnvironmentVariableW(L"WSM_INPUT_PUMP_OBSERVATION_OPT_IN", length ? previous : nullptr) != FALSE);
+    }
+    for (const auto failure : {HookResult::failed, HookResult::timeout, HookResult::busy}) {
+        dispatch_injected = failure;
+        for (const auto action : {RosterAction::input_watch_state, RosterAction::input_watch_stop}) {
+            ProbeContext data; data.command.action = action;
+            data.input_pump = std::make_unique<RewiredInputPump>();
+            dispatch_hook_calls = 0;
+            const auto result = dispatch_roster_command(nullptr, data, unavailable_dispatch);
+            check("production watch dispatch bypasses busy or stalled hook", result == HookResult::completed &&
+                  dispatch_hook_calls == 0 && data.action_succeeded && data.input_watch_captured);
+        }
+        for (const auto action : {RosterAction::input_watch_start, RosterAction::inspect}) {
+            ProbeContext engine; engine.command.action = action;
+            dispatch_hook_calls = 0;
+            check("engine actions still require actual hook", dispatch_roster_command(nullptr, engine, unavailable_dispatch) == failure && dispatch_hook_calls == 1 && !engine.action_succeeded);
+        }
+    }
+    for (const auto action : {RosterAction::input_watch_start, RosterAction::input_watch_state, RosterAction::input_watch_stop}) {
+        ProbeContext cached; cached.command.action = action;
+        cached.control = std::make_unique<RewiredControllerSession>();
+        check("watch response omits unrelated cached controller and axes", result_json(cached, 1).find("\"ownedControl\":") == std::string::npos);
+    }
     {
         wchar_t previous[128]{};
         const DWORD length=GetEnvironmentVariableW(L"WSM_CAMERA_FOLLOW_OPT_IN",previous,128);

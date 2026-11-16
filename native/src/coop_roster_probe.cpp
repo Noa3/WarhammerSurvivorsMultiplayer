@@ -3,11 +3,13 @@
 #include "wsm/player_observer.h"
 #include "wsm/rewired_input_profile.h"
 #include "wsm/rewired_control_pulse.h"
+#include "wsm/rewired_input_pump.h"
 #include "wsm/upgrade_pass_hook.h"
 #include "wsm/upgrade_pass_profile.h"
 #include "wsm/upgrade_choice_controller.h"
 #include "wsm/player_camera_controller.h"
 #include <cmath>
+#include <atomic>
 #include "wsm/window_hook.h"
 #include <charconv>
 #include <filesystem>
@@ -22,7 +24,24 @@
 
 namespace wsm {
 namespace {
-enum class RosterAction { inspect, enroll, rollback, select_player, copy_character, upgrade_context, upgrade_selection, upgrade_items, upgrade_hint, equipment, input_profile, control_environment, control_open, control_pulse, control_close, upgrade_hook_inspect, upgrade_hook_install, upgrade_hook_remove, upgrade_offer, upgrade_choose, upgrade_choice_close, camera_open, camera_mode, camera_state, camera_close };
+enum class RosterAction { inspect, enroll, rollback, select_player, copy_character, upgrade_context, upgrade_selection, upgrade_items, upgrade_hint, equipment, input_profile, control_environment, control_open, control_pulse, control_close, upgrade_hook_inspect, upgrade_hook_install, upgrade_hook_remove, upgrade_offer, upgrade_choose, upgrade_choice_close, camera_open, camera_mode, camera_state, camera_close, input_watch_start, input_watch_state, input_watch_stop };
+bool input_watch_action(RosterAction action) {
+    return action == RosterAction::input_watch_start || action == RosterAction::input_watch_state || action == RosterAction::input_watch_stop;
+}
+bool input_watch_opt_in() {
+    wchar_t value[8]{};
+    return GetEnvironmentVariableW(L"WSM_INPUT_PUMP_OBSERVATION_OPT_IN", value, 8) == 1 && value[0] == L'1';
+}
+// Pure observer client: no controller, axis setter or game object is acquired.
+class InputWatchClient final : public InputPumpClient {
+    std::atomic<bool> stopping{false}, closed{false};
+public:
+    bool start(std::string&) override { return true; }
+    void input_tick(std::uint64_t) override {}
+    void recovery_tick(std::uint64_t) override { if (stopping.load()) closed.store(true); }
+    void request_stop() noexcept override { stopping.store(true); }
+    bool stopped() const noexcept override { return closed.load(); }
+};
 // Keep patch/recovery ownership past the bounded diagnostic worker lifetime.
 UpgradePassHook process_upgrade_hook;
 struct RosterCommand {
@@ -72,7 +91,9 @@ bool parse_command(std::string_view text, DWORD expected_pid, RosterCommand& out
         {"controlEnvironment:",RosterAction::control_environment},{"controlClose:",RosterAction::control_close},
         {"upgradeHook:",RosterAction::upgrade_hook_inspect},{"upgradeHookInstall:",RosterAction::upgrade_hook_install},
         {"upgradeHookRemove:",RosterAction::upgrade_hook_remove},{"upgradeChoiceClose:",RosterAction::upgrade_choice_close},
-        {"cameraState:",RosterAction::camera_state},{"cameraClose:",RosterAction::camera_close}}) {
+        {"cameraState:",RosterAction::camera_state},{"cameraClose:",RosterAction::camera_close},
+        {"inputWatchStart:",RosterAction::input_watch_start},{"inputWatchState:",RosterAction::input_watch_state},
+        {"inputWatchStop:",RosterAction::input_watch_stop}}) {
         if(text.substr(0,route.first.size())==route.first) {
             DWORD pid=0;if(!number(text.substr(route.first.size()),pid)||pid!=expected_pid)return false;
             result.action=route.second;output=result;return true;
@@ -248,6 +269,7 @@ void publish_result(const std::filesystem::path& path, const std::string& text) 
 }
 struct ProbeContext {
     HMODULE module = nullptr;
+    HMODULE bridge = nullptr;
     Il2CppApi api;
     Il2CppDomain* domain = nullptr;
     CoopRoster roster;
@@ -267,6 +289,9 @@ struct ProbeContext {
     RewiredPulseResult pulse;
     PlayerReadStatus control_status = PlayerReadStatus::Error;
     std::string control_error;
+    std::unique_ptr<RewiredInputPump> input_pump;
+    RewiredInputPumpState input_watch_state;
+    bool input_watch_captured = false;
     bool startup_patch_checked=false,startup_patch_verified=false;
     std::string startup_patch_error;
     std::unique_ptr<UpgradeChoiceController> choice;
@@ -296,6 +321,21 @@ bool ensure_control(ProbeContext& c) {
 }
 void execute_command(void* raw) {
     auto& c = *static_cast<ProbeContext*>(raw);
+    if (input_watch_action(c.command.action)) c.input_watch_captured = false;
+    if (c.command.action == RosterAction::input_watch_start && !input_watch_opt_in()) {
+        c.action_succeeded = false;
+        c.error = c.action_error = "Input event observation requires separate WSM_INPUT_PUMP_OBSERVATION_OPT_IN=1";
+        return;
+    }
+    // Status and stop are data-only: no engine call or synchronous cleanup.
+    if (c.command.action == RosterAction::input_watch_state || c.command.action == RosterAction::input_watch_stop) {
+        c.action_error.clear(); c.error.clear();
+        if (c.input_pump && c.command.action == RosterAction::input_watch_stop) c.input_pump->stop();
+        c.input_watch_state = c.input_pump ? c.input_pump->state() : RewiredInputPumpState{};
+        c.input_watch_captured = c.input_pump != nullptr;
+        c.action_succeeded = true;
+        return;
+    }
     c.choice_offer={};c.choice_result={};c.choice_status=PlayerReadStatus::Error;
     if(camera_action(c.command.action)) { c.camera_state_captured=false; c.camera_open_status=PlayerReadStatus::Error; }
     if((c.command.action==RosterAction::camera_open||c.command.action==RosterAction::camera_mode)&&!camera_opt_in()) {
@@ -323,6 +363,22 @@ void execute_command(void* raw) {
     }
     try {
         if (!c.guard.verify(c.window.thread, 0, c.identity, c.action_error)) { c.error = c.action_error; return; }
+        if (c.command.action == RosterAction::input_watch_start) {
+            if (c.input_pump && !c.input_pump->state().cleanup_complete) {
+                c.action_error = "Previous input observation still owns its cleanup";
+            } else {
+                auto pump = std::make_unique<RewiredInputPump>();
+                if (pump->initialize(c.module, c.api, c.domain, c.bridge, c.window.hwnd,
+                                     c.window.thread, c.identity.managed_thread, c.action_error)) {
+                    c.input_pump = std::move(pump);
+                    c.action_succeeded = c.input_pump->start(std::make_unique<InputWatchClient>(), c.action_error);
+                }
+            }
+            c.input_watch_state = c.input_pump ? c.input_pump->state() : RewiredInputPumpState{};
+            c.input_watch_captured = c.input_pump != nullptr;
+            c.error = c.action_error;
+            return;
+        }
         if(camera_action(c.command.action)) {
             if(c.command.action==RosterAction::camera_open) {
                 if(!c.camera) {
@@ -413,6 +469,18 @@ std::string quoted_json(std::string_view value) {
     result += '"';
     return result;
 }
+HookResult dispatch_roster_teardown(HMODULE bridge, ProbeContext& c, void (*cleanup)(void*), DWORD timeout_ms = 2000) {
+    // Recovery callbacks may temporarily own the global hook; wait within the same bounded admission deadline.
+    return run_window_hook_waiting(bridge, c.window.hwnd, c.window.thread, cleanup, &c, timeout_ms);
+}
+HookResult dispatch_roster_command(HMODULE bridge, ProbeContext& c,
+                                  decltype(&run_window_hook) hook = run_window_hook_waiting) {
+    if (c.command.action == RosterAction::input_watch_state || c.command.action == RosterAction::input_watch_stop) {
+        execute_command(&c);
+        return HookResult::completed;
+    }
+    return hook(bridge, c.window.hwnd, c.window.thread, execute_command, &c, 2000);
+}
 std::string result_json(const ProbeContext& c, unsigned sample) {
     const char* state = c.status == CoopRosterStatus::Captured ? "captured" : c.status == CoopRosterStatus::NotReady ? "not_ready" : "error";
     const char* action = c.command.action == RosterAction::inspect ? "inspect" : c.command.action == RosterAction::enroll ? "enroll" : c.command.action == RosterAction::select_player ? "select" : c.command.action == RosterAction::copy_character ? "copyCharacter" : c.command.action == RosterAction::upgrade_context ? "upgradeContext" : c.command.action == RosterAction::upgrade_selection ? "upgradeSelection" : c.command.action == RosterAction::upgrade_items ? "upgradeItems" : c.command.action == RosterAction::upgrade_hint ? "upgradeHint" : c.command.action==RosterAction::equipment?"equipment":c.command.action==RosterAction::input_profile?"inputProfile":"rollback";
@@ -430,6 +498,9 @@ std::string result_json(const ProbeContext& c, unsigned sample) {
     if(c.command.action==RosterAction::camera_mode)action="cameraMode";
     if(c.command.action==RosterAction::camera_state)action="cameraState";
     if(c.command.action==RosterAction::camera_close)action="cameraClose";
+    if(c.command.action==RosterAction::input_watch_start)action="inputWatchStart";
+    if(c.command.action==RosterAction::input_watch_state)action="inputWatchState";
+    if(c.command.action==RosterAction::input_watch_stop)action="inputWatchStop";
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << "{\"schemaVersion\":1,\"sample\":" << sample << ",\"action\":\"" << action
@@ -567,7 +638,7 @@ std::string result_json(const ProbeContext& c, unsigned sample) {
         out<<']';
     }
     out<<'}';
-    if(c.control){const auto s=c.control->state();out<<",\"ownedControl\":{\"playerId\":"<<s.player_id<<",\"controllerId\":"<<s.controller_id<<",\"mapId\":"<<s.map_id<<",\"created\":"<<(s.controller_created?"true":"false")<<",\"attached\":"<<(s.controller_attached?"true":"false")<<",\"registered\":"<<(s.map_registered?"true":"false")<<",\"cleanupRequired\":"<<(s.cleanup_required?"true":"false")<<",\"x\":"<<s.horizontal<<",\"y\":"<<s.vertical<<'}';}
+    if(c.control && !input_watch_action(c.command.action)){const auto s=c.control->state();out<<",\"ownedControl\":{\"playerId\":"<<s.player_id<<",\"controllerId\":"<<s.controller_id<<",\"mapId\":"<<s.map_id<<",\"created\":"<<(s.controller_created?"true":"false")<<",\"attached\":"<<(s.controller_attached?"true":"false")<<",\"registered\":"<<(s.map_registered?"true":"false")<<",\"cleanupRequired\":"<<(s.cleanup_required?"true":"false")<<",\"x\":"<<s.horizontal<<",\"y\":"<<s.vertical<<'}';}
     if(c.command.action==RosterAction::control_pulse){out<<",\"pulse\":{\"nonzeroWritten\":"<<(c.pulse.nonzero_written?"true":"false")<<",\"neutralized\":"<<(c.pulse.neutralized?"true":"false")<<",\"focusLost\":"<<(c.pulse.focus_lost?"true":"false")<<",\"resourcesClosed\":"<<(c.pulse.resources_closed?"true":"false")<<",\"updates\":"<<c.pulse.updates;
         out<<",\"before\":"<<player_observation_json(c.pulse.before.players.empty()?PlayerReadStatus::NotReady:PlayerReadStatus::Captured,c.pulse.before,c.identity,sample)<<",\"after\":"<<player_observation_json(c.pulse.after.players.empty()?PlayerReadStatus::NotReady:PlayerReadStatus::Captured,c.pulse.after,c.identity,sample)<<'}';}
     if(c.command.action==RosterAction::upgrade_hook_inspect || c.command.action==RosterAction::upgrade_hook_install || c.command.action==RosterAction::upgrade_hook_remove) {
@@ -618,6 +689,27 @@ std::string result_json(const ProbeContext& c, unsigned sample) {
         }
         out<<'}';
     }
+    if (input_watch_action(c.command.action)) {
+        out << ",\"inputEventWatch\":{\"stateCaptured\":" << (c.input_watch_captured ? "true" : "false")
+            << ",\"nonzeroEnabled\":false,\"consumerOrderingProven\":false";
+        if (c.input_watch_captured) {
+            const auto& s = c.input_watch_state;
+            out << ",\"started\":" << (s.started ? "true" : "false")
+                << ",\"subscriptionPending\":" << (s.subscription_pending ? "true" : "false")
+                << ",\"stopRequested\":" << (s.stop_requested ? "true" : "false")
+                << ",\"cleanupComplete\":" << (s.cleanup_complete ? "true" : "false")
+                << ",\"recoveryRunning\":" << (s.recovery_running ? "true" : "false")
+                << ",\"windowLost\":" << (s.window_lost ? "true" : "false")
+                << ",\"inputUpdates\":" << quoted_json(std::to_string(s.input_updates))
+                << ",\"recoveryUpdates\":" << quoted_json(std::to_string(s.recovery_updates))
+                << ",\"foreignCallbacks\":" << quoted_json(std::to_string(s.foreign_callbacks))
+                << ",\"reentrantCallbacks\":" << quoted_json(std::to_string(s.reentrant_callbacks))
+                << ",\"lastInputMs\":" << quoted_json(std::to_string(s.last_input_ms))
+                << ",\"lastRecoveryMs\":" << quoted_json(std::to_string(s.last_recovery_ms))
+                << ",\"error\":" << quoted_json(s.error);
+        }
+        out << '}';
+    }
     out << ",\"playerObservation\":" << player_observation_json(c.player_status, c.scene, c.identity, sample)
         << ",\"errors\":{\"action\":" << quoted_json(c.action_error)
         << ",\"roster\":" << quoted_json(c.roster_error)
@@ -650,7 +742,7 @@ void run_coop_roster_probe(HMODULE bridge, HMODULE game, Il2CppApi api,
             !c.roster.initialize(game, api, domain, c.window.thread, 0, c.error) ||
             !c.player.initialize(game, api, domain, c.window.thread, 0, c.error))
             throw std::runtime_error("Roster/player metadata contract: " + c.error);
-        c.module=game;c.api=api;c.domain=domain;
+        c.module=game;c.bridge=bridge;c.api=api;c.domain=domain;
         attachment.detach();
         log("WSM_ROSTER_READY: metadata worker detached; 32 bounded requests; roster changes require outside-run phase, input changes require separate opt-in");
         const auto deadline = GetTickCount64() + 15ull * 60 * 1000;
@@ -669,9 +761,10 @@ void run_coop_roster_probe(HMODULE bridge, HMODULE game, Il2CppApi api,
             c.startup_patch_checked=false;c.startup_patch_verified=false;c.startup_patch_error.clear();
             c.choice_offer={};c.choice_result={};c.choice_status=PlayerReadStatus::Error;
             c.camera_state_captured=false;c.camera_open_status=PlayerReadStatus::Error;
+            c.input_watch_state={};c.input_watch_captured=false;
 
-            const auto status = run_window_hook(bridge, c.window.hwnd, c.window.thread, execute_command, &c, 2000);
-            if (status != HookResult::completed) { c.action_succeeded = false; c.status = CoopRosterStatus::Error; c.player_status = PlayerReadStatus::Error; c.upgrade_status=PlayerReadStatus::Error; c.equipment_status=PlayerReadStatus::Error; c.input_profile_status=PlayerReadStatus::Error; c.error = c.action_error = "Owned Unity roster callback did not complete"; }
+            const auto status = dispatch_roster_command(bridge, c);
+            if (status != HookResult::completed) { c.action_succeeded = false; c.status = CoopRosterStatus::Error; c.player_status = PlayerReadStatus::Error; c.upgrade_status=PlayerReadStatus::Error; c.equipment_status=PlayerReadStatus::Error; c.input_profile_status=PlayerReadStatus::Error; c.error = c.action_error = status == HookResult::busy ? "Owned Unity roster callback is busy; retry the command" : "Owned Unity roster callback did not complete"; }
             publish_result(directory / ("state-" + number.str() + ".json"), result_json(c, sample));
             log("WSM_ROSTER_RESULT=" + std::to_string(sample) + " success=" + std::to_string(c.action_succeeded) +
                 " pending=" + std::to_string(c.roster.has_pending_enrollment()));
@@ -683,17 +776,17 @@ void run_coop_roster_probe(HMODULE bridge, HMODULE game, Il2CppApi api,
     } catch (const std::exception& e) { log(std::string("ERROR: roster probe stopped: ") + e.what()); }
     if(context&&context->camera&&IsWindow(context->window.hwnd)) {
         context->command.action=RosterAction::camera_close;context->action_succeeded=false;context->action_error.clear();
-        const auto done=run_window_hook(bridge,context->window.hwnd,context->window.thread,execute_command,context.get(),2000);
+        const auto done=dispatch_roster_teardown(bridge,*context,execute_command);
         log(done==HookResult::completed&&context->action_succeeded?"WSM_CAMERA_CLEANUP: owned callback removed":"ERROR: camera cleanup unverified; exposed context retained until process exit");
     }
     if(context&&context->control&&context->control->state().cleanup_required&&IsWindow(context->window.hwnd)) {
         auto cleanup=[](void* raw){auto& c=*static_cast<ProbeContext*>(raw);c.action_succeeded=c.control->close(c.control_error);};
-        const auto done=run_window_hook(bridge,context->window.hwnd,context->window.thread,cleanup,context.get(),2000);
+        const auto done=dispatch_roster_teardown(bridge,*context,cleanup);
         log(done==HookResult::completed&&context->action_succeeded?"WSM_CONTROL_CLEANUP: owned resources removed":"ERROR: owned control cleanup unverified; resources retained until process exit");
     }
     if(context&&context->choice&&IsWindow(context->window.hwnd)) {
         auto cleanup=[](void* raw){auto& c=*static_cast<ProbeContext*>(raw);c.action_succeeded=c.choice->close(c.action_error);if(c.action_succeeded)c.choice.reset();};
-        const auto done=run_window_hook(bridge,context->window.hwnd,context->window.thread,cleanup,context.get(),2000);
+        const auto done=dispatch_roster_teardown(bridge,*context,cleanup);
         log(done==HookResult::completed&&context->action_succeeded?"WSM_CHOICE_CLEANUP: retained offers released":"ERROR: choice cleanup unverified; roots retained until process exit");
     }
     if (context && context->roster.has_pending_enrollment())

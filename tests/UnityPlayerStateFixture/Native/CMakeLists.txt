@@ -4,3 +4,5 @@ add_library(fixture SHARED fixture.cpp control_fixture.cpp upgrade_choice_fixtur
 target_include_directories(fixture PRIVATE ../../../native/include)
 target_compile_features(fixture PRIVATE cxx_std_17)
 target_compile_definitions(fixture PRIVATE WSM_PLAYER_STATE_TESTING)
+target_sources(fixture PRIVATE input_pump_fixture.cpp ../../../native/src/rewired_input_pump.cpp ../../../native/src/window_hook.cpp)
+target_sources(fixture PRIVATE input_driver_fixture.cpp ../../../native/src/rewired_input_client.cpp ../../../native/src/input_driver.cpp ../../../native/src/input_lease.cpp)
