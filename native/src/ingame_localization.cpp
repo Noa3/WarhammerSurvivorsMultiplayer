@@ -26,6 +26,21 @@ constexpr std::array<std::array<std::string_view, 6>, 13> camera_catalog = {{
     {{"Kendi kameram", "Ortak kamera", "Kamera etkin değil", "Kamera etkin", "İzleniyor", "Kamera kullanılamıyor"}},
     {{"Власна камера", "Спільна камера", "Камера неактивна", "Камера активна", "Спостереження", "Камера недоступна"}}
 }};
+constexpr std::array<std::array<std::string_view, 3>, 13> name_catalog = {{
+    {{"You: {name}", "Players", "Player"}},
+    {{"Du: {name}", "Spieler", "Spieler"}},
+    {{"Vous : {name}", "Joueurs", "Joueur"}},
+    {{"Tu: {name}", "Giocatori", "Giocatore"}},
+    {{"Tú: {name}", "Jugadores", "Jugador"}},
+    {{"あなた: {name}", "プレイヤー", "プレイヤー"}},
+    {{"나: {name}", "플레이어", "플레이어"}},
+    {{"Ty: {name}", "Gracze", "Gracz"}},
+    {{"Você: {name}", "Jogadores", "Jogador"}},
+    {{"Вы: {name}", "Игроки", "Игрок"}},
+    {{"你：{name}", "玩家", "玩家"}},
+    {{"Sen: {name}", "Oyuncular", "Oyuncu"}},
+    {{"Ви: {name}", "Гравці", "Гравець"}}
+}};
 // Rows follow Text exactly; values remain static for the lifetime of the process.
 constexpr std::array<Row, 13> catalog = {{
 {{"Co-op [F6]", "Co-op connection", "IP address", "Port", "Host", "Join", "Leave",
@@ -213,9 +228,14 @@ std::string_view text(Text id, std::string_view language) {
     auto index = static_cast<std::size_t>(id);
     if (index >= static_cast<std::size_t>(Text::Count)) index = static_cast<std::size_t>(Text::NetworkUnavailable);
     const auto canonical = normalize_language(language);
+    const auto lookup = [&](std::size_t row) {
+        if (index < count) return catalog[row][index];
+        const auto names = static_cast<std::size_t>(Text::LocalPlayerName);
+        return index < names ? camera_catalog[row][index - count] : name_catalog[row][index - names];
+    };
     for (std::size_t i = 0; i < languages.size(); ++i)
-        if (canonical == languages[i]) return index < count ? catalog[i][index] : camera_catalog[i][index - count];
-    return index < count ? catalog[0][index] : camera_catalog[0][index - count];
+        if (canonical == languages[i]) return lookup(i);
+    return lookup(0);
 }
 
 std::string format(Text id, std::string_view language,

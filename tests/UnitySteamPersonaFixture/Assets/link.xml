@@ -1,0 +1,5 @@
+<linker>
+  <assembly fullname="com.rlabrecque.steamworks.net" preserve="all" />
+  <assembly fullname="UnityEngine.CoreModule"><type fullname="UnityEngine.UnitySynchronizationContext" preserve="all" /></assembly>
+  <assembly fullname="mscorlib"><type fullname="System.Threading.Thread" preserve="all" /><type fullname="System.Threading.SynchronizationContext" preserve="all" /></assembly>
+</linker>

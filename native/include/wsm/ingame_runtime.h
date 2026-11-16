@@ -12,6 +12,10 @@ public:
     int host(int port, bool lan);
     int join(const std::string& address, int port);
     int leave();
+    bool names_ready() const;
+    int set_player_name(const std::string& name);
+    std::string local_player_name() const;
+    std::string player_names() const;
     std::string status() const;
     // Translate stable machine categories, never the backend's human-readable text.
     std::string localized_status(const std::string& language, bool lan = true) const;
@@ -26,5 +30,8 @@ private:
     int (__cdecl* peer_count_)() = nullptr;
     int (__cdecl* bound_port_)() = nullptr;
     int (__cdecl* last_error_)(unsigned char*, int) = nullptr;
+    int (__cdecl* set_player_name_)(const unsigned char*, int) = nullptr;
+    int (__cdecl* local_player_name_)(unsigned char*, int) = nullptr;
+    int (__cdecl* player_names_)(unsigned char*, int) = nullptr;
 };
 }

@@ -79,8 +79,8 @@ internal static class NetworkRegression
         {
             using var tcp = new TcpClient(); await tcp.ConnectAsync(IPAddress.Loopback, host.Port, timeout.Token);
             var stream = tcp.GetStream();
-            await Send(stream, "{\"Type\":\"join\",\"Version\":4,\"Password\":\"x\"}", timeout.Token);
-            await Read(stream, timeout.Token); var id = await host.Joined.ReadAsync(timeout.Token);
+            await Send(stream, $"{{\"Type\":\"join\",\"Version\":{SessionHost.ProtocolVersion},\"Password\":\"x\",\"DisplayName\":\"Player\"}}", timeout.Token);
+            await Read(stream, timeout.Token); var id = await host.Joined.ReadAsync(timeout.Token); await Read(stream, timeout.Token);
             await Send(stream, payload, timeout.Token);
             Check(await stream.ReadAsync(new byte[1], timeout.Token) == 0, "Invalid client was not closed");
             Check(await host.Disconnected.ReadAsync(timeout.Token) == id, "Invalid client did not disconnect");
@@ -89,9 +89,10 @@ internal static class NetworkRegression
         {
             await tcp.ConnectAsync(IPAddress.Loopback, host.Port, timeout.Token);
             var stream = tcp.GetStream();
-            await Send(stream, "{\"Type\":\"join\",\"Version\":4,\"Password\":\"x\"}", timeout.Token);
+            await Send(stream, $"{{\"Type\":\"join\",\"Version\":{SessionHost.ProtocolVersion},\"Password\":\"x\",\"DisplayName\":\"Player\"}}", timeout.Token);
             var welcome = await Read(stream, timeout.Token);
             var id = await host.Joined.ReadAsync(timeout.Token);
+            await Read(stream, timeout.Token); // initial roster
             for (int i = 0; i < 129; i++) await Send(stream, $"{{\"Type\":\"input\",\"Input\":{{\"PlayerId\":\"{id}\",\"X\":0,\"Y\":0}}}}", timeout.Token);
             Check(await stream.ReadAsync(new byte[1], timeout.Token) == 0, "Queue overflow did not close client");
             Check(await host.Disconnected.ReadAsync(timeout.Token) == id, "Overflow client did not disconnect");
@@ -107,7 +108,7 @@ internal static class NetworkRegression
         await using var host = new SessionHost(new SessionSettings(2, DeathMode.AllDead, 0, BotDifficulty.Normal), "x"); host.Start();
         using var slow = new TcpClient(); slow.ReceiveBufferSize = 1024;
         await slow.ConnectAsync(IPAddress.Loopback, host.Port, timeout.Token);
-        await Send(slow.GetStream(), "{\"Type\":\"join\",\"Version\":4,\"Password\":\"x\"}", timeout.Token);
+        await Send(slow.GetStream(), $"{{\"Type\":\"join\",\"Version\":{SessionHost.ProtocolVersion},\"Password\":\"x\",\"DisplayName\":\"Player\"}}", timeout.Token);
         await Read(slow.GetStream(), timeout.Token); var slowId = await host.Joined.ReadAsync(timeout.Token);
         await using var healthy = await SessionClient.ConnectAsync(IPAddress.Loopback, host.Port, "x", timeout.Token);
         await host.Joined.ReadAsync(timeout.Token);

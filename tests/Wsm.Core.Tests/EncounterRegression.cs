@@ -37,7 +37,7 @@ static class EncounterRegression
         Check(b.Progression.Xp == 0 && b.ReceivedRewards.Length == 0 && !b.Rewards.TryRead(out _), "other client unchanged");
         using var raw = new TcpClient(); await raw.ConnectAsync(IPAddress.Loopback, host.Port, timeout.Token);
         using var peer = new Peer(raw);
-        await peer.SendAsync(new Message("join", Version: SessionHost.ProtocolVersion, Password: "x"), timeout.Token); await peer.ReadAsync(timeout.Token);
+        await peer.SendAsync(new Message("join", Version: SessionHost.ProtocolVersion, Password: "x", DisplayName: "Player"), timeout.Token); await peer.ReadAsync(timeout.Token); await peer.ReadAsync(timeout.Token); // initial roster
         await peer.SendAsync(new Message("reward", Reward: xp), timeout.Token);
         try { await peer.ReadAsync(timeout.Token); throw new Exception("client reward frame accepted"); } catch (EndOfStreamException) { }
         Check(a.Progression.Xp == 25 && b.Progression.Xp == 0, "spoof did not alter rewards");

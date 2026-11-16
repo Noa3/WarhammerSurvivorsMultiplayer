@@ -3,6 +3,7 @@
 #include "wsm/ingame_runtime.h"
 #include "wsm/ingame_localization.h"
 #include "wsm/player_camera_controller.h"
+#include "wsm/steam_persona_reader.h"
 #include "wsm/main_thread_guard.h"
 #include "wsm/window_hook.h"
 #include <filesystem>
@@ -36,6 +37,10 @@ struct Context {
     Window window;
     wsm::MainThreadGuard guard;
     wsm::InGameRuntime runtime;
+    std::unique_ptr<wsm::SteamPersonaReader> persona;
+    wsm::MainThreadIdentity identity{};
+    ULONGLONG next_persona_read = 0;
+    std::string requested_player_name, player_name_source;
     std::unique_ptr<wsm::PlayerCameraController> camera;
     wsm::PlayerStateReader camera_lifecycle;
     wsm::CameraFollowMode camera_mode = wsm::CameraFollowMode::OwnPlayer;
@@ -54,10 +59,37 @@ struct Context {
 void command_result(Context& c, int result) {
     c.command_failed = result < 0;
 }
-void host(void* raw, int port) { auto& c = *static_cast<Context*>(raw); command_result(c, c.runtime.host(port, true)); }
-void join(void* raw, const std::string& address, int port) { auto& c = *static_cast<Context*>(raw); command_result(c, c.runtime.join(address, port)); }
+void refresh_player_name(Context& c, bool force = false) {
+    if (!c.runtime.names_ready() || (!force && GetTickCount64() < c.next_persona_read)) return;
+    c.next_persona_read = GetTickCount64() + 5000;
+    std::string error, persona;
+    if (!c.persona) {
+        auto candidate = std::make_unique<wsm::SteamPersonaReader>();
+        if (candidate->initialize(c.game, c.api, c.domain, c.identity.os_thread, c.identity.managed_thread, error))
+            c.persona = std::move(candidate);
+    }
+    const bool from_steam = c.persona && c.persona->read(persona, error) == wsm::PlayerReadStatus::Captured;
+    const auto name = from_steam ? persona : std::string(wsm::i18n::text(wsm::i18n::Text::PlayerFallback, c.menu->language()));
+    if (name != c.requested_player_name && c.runtime.set_player_name(name) >= 0) c.requested_player_name = name;
+    const std::string source = from_steam ? "steam" : "fallback";
+    if (source != c.player_name_source) {
+        c.player_name_source = source;
+        // Names are display data, not authentication. Do not log account names or IDs.
+        c.log("WSM_PLAYER_NAME_SOURCE=" + source);
+    }
+}
+void host(void* raw, int port) { auto& c = *static_cast<Context*>(raw); refresh_player_name(c, true); command_result(c, c.runtime.host(port, true)); }
+void join(void* raw, const std::string& address, int port) { auto& c = *static_cast<Context*>(raw); refresh_player_name(c, true); command_result(c, c.runtime.join(address, port)); }
 void leave(void* raw) { auto& c = *static_cast<Context*>(raw); command_result(c, c.runtime.leave()); }
 std::string status(void* raw, const std::string& language) { auto& c = *static_cast<Context*>(raw); return c.command_failed ? std::string(wsm::i18n::text(wsm::i18n::Text::ActionRejected, language)) : c.runtime.localized_status(language); }
+std::string local_player_name(void* raw, const std::string&) {
+    auto& c = *static_cast<Context*>(raw);
+    const auto admitted = c.runtime.local_player_name();
+    // The transport correctly clears departed roster identity. Outside a
+    // session, still show this process's configured local display preference.
+    return admitted.empty() ? c.requested_player_name : admitted;
+}
+std::string player_names(void* raw, const std::string&) { return static_cast<Context*>(raw)->runtime.player_names(); }
 void camera_mode(void* raw, bool shared) {
     auto& c = *static_cast<Context*>(raw);
     c.camera_mode = shared ? wsm::CameraFollowMode::SharedAlive : wsm::CameraFollowMode::OwnPlayer;
@@ -131,6 +163,7 @@ void callback(void* raw) {
     auto& c = *static_cast<Context*>(raw);
     wsm::MainThreadIdentity identity;
     if (!c.guard.verify(c.window.thread, 0, identity, c.error)) return;
+    c.identity = identity;
     try {
         if (c.stop) {
             if (c.camera_initialized) c.camera_cleanup_pending = !c.camera->close(c.camera_error);
@@ -147,7 +180,10 @@ void callback(void* raw) {
                   " managed=" + std::to_string(identity.managed_thread) + " engine_main=" + std::to_string(identity.engine_main_thread));
         }
         tick_camera(c, identity);
-        c.menu->tick({&c, host, join, leave, status, camera_mode, camera_status});
+        refresh_player_name(c);
+        wsm::InGameMenuActions actions{&c, host, join, leave, status, camera_mode, camera_status};
+        if (c.runtime.names_ready()) { actions.local_player_name = local_player_name; actions.player_names = player_names; }
+        c.menu->tick(actions);
         const auto language = c.menu->language();
         if (language != c.previous_language) { c.previous_language = language; c.log("WSM_INGAME_LANGUAGE=" + language); }
     } catch (const std::exception& error) { c.error = error.what(); c.fatal = true; }

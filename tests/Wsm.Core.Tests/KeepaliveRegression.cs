@@ -39,9 +39,9 @@ internal static class KeepaliveRegression
         using var tcp = new TcpClient();
         await tcp.ConnectAsync(IPAddress.Loopback, host.Port, deadline.Token);
         var stream = tcp.GetStream();
-        await Send(stream, JsonSerializer.Serialize(new Message("join", Version: SessionHost.ProtocolVersion, Password: "x")), deadline.Token);
+        await Send(stream, JsonSerializer.Serialize(new Message("join", Version: SessionHost.ProtocolVersion, Password: "x", DisplayName: "Player")), deadline.Token);
         await Read(stream, deadline.Token);
-        var id = await host.Joined.ReadAsync(deadline.Token);
+        var id = await host.Joined.ReadAsync(deadline.Token); await Read(stream, deadline.Token); // initial roster
         using var ping = JsonDocument.Parse(await Read(stream, deadline.Token));
         Check(ping.RootElement.GetProperty("Type").GetString() == "ping", "host did not send ping");
         var disconnected = host.Disconnected.ReadAsync(deadline.Token).AsTask();
@@ -102,8 +102,8 @@ internal static class KeepaliveRegression
         await using var host = new SessionHost(new(1, DeathMode.AllDead, 0, BotDifficulty.Normal), "x"); host.Start();
         using var tcp = new TcpClient(); await tcp.ConnectAsync(IPAddress.Loopback, host.Port, deadline.Token);
         var stream = tcp.GetStream();
-        await Send(stream, JsonSerializer.Serialize(new Message("join", Version: SessionHost.ProtocolVersion, Password: "x")), deadline.Token);
-        await Read(stream, deadline.Token); var id = await host.Joined.ReadAsync(deadline.Token);
+        await Send(stream, JsonSerializer.Serialize(new Message("join", Version: SessionHost.ProtocolVersion, Password: "x", DisplayName: "Player")), deadline.Token);
+        await Read(stream, deadline.Token); var id = await host.Joined.ReadAsync(deadline.Token); await Read(stream, deadline.Token); // initial roster
         if (waitPing) await Read(stream, deadline.Token);
         await Send(stream, payload, deadline.Token);
         Check(await host.Disconnected.ReadAsync(deadline.Token) == id, "invalid heartbeat client accepted");
@@ -134,8 +134,8 @@ internal static class KeepaliveRegression
         await using var host = new SessionHost(new(1, DeathMode.AllDead, 0, BotDifficulty.Normal), "x"); host.Start();
         using var tcp = new TcpClient(); await tcp.ConnectAsync(IPAddress.Loopback, host.Port, deadline.Token);
         var stream = tcp.GetStream();
-        await Send(stream, JsonSerializer.Serialize(new Message("join", Version: SessionHost.ProtocolVersion, Password: "x")), deadline.Token);
-        await Read(stream, deadline.Token); var id = await host.Joined.ReadAsync(deadline.Token);
+        await Send(stream, JsonSerializer.Serialize(new Message("join", Version: SessionHost.ProtocolVersion, Password: "x", DisplayName: "Player")), deadline.Token);
+        await Read(stream, deadline.Token); var id = await host.Joined.ReadAsync(deadline.Token); await Read(stream, deadline.Token); // initial roster
         await CheckEcho(stream, deadline.Token);
         using var ping = JsonDocument.Parse(await Read(stream, deadline.Token));
         var nonce = ping.RootElement.GetProperty("Nonce").GetGuid();
@@ -184,8 +184,8 @@ internal static class KeepaliveRegression
         var host = new SessionHost(new(1, DeathMode.AllDead, 0, BotDifficulty.Normal), "x"); host.Start();
         using var tcp = new TcpClient(); await tcp.ConnectAsync(IPAddress.Loopback, host.Port, deadline.Token);
         var stream = tcp.GetStream();
-        await Send(stream, JsonSerializer.Serialize(new Message("join", Version: SessionHost.ProtocolVersion, Password: "x")), deadline.Token);
-        await Read(stream, deadline.Token); await host.Joined.ReadAsync(deadline.Token); await Read(stream, deadline.Token);
+        await Send(stream, JsonSerializer.Serialize(new Message("join", Version: SessionHost.ProtocolVersion, Password: "x", DisplayName: "Player")), deadline.Token);
+        await Read(stream, deadline.Token); await host.Joined.ReadAsync(deadline.Token); await Read(stream, deadline.Token); await Read(stream, deadline.Token);
         await Task.WhenAll(host.DisposeAsync().AsTask(), host.DisposeAsync().AsTask()).WaitAsync(deadline.Token);
         var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
         try

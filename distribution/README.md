@@ -14,6 +14,8 @@ Open **Co-op [F6]** in the launched game. Host a port or join an IPv4 endpoint. 
 
 The panel offers **Own camera** by default and an optional **Shared camera** following living actors. These preferences do not create remote players or separate client views. Zoom and bounds remain under the game's control; exact stock single-player framing after a death is not verified.
 
+The panel and compact player list use Steam display names when available, with a generic fallback. Names are presentation, not Steam account authentication. Use a matching build on all peers: the name-aware protocol is version 5 and cannot connect to protocol-4 previews. See [player names](../docs/PLAYER_NAMES.md).
+
 ## Game copies and saves
 
 The entry point stores verified installation copies under `%LOCALAPPDATA%/WarhammerSurvivorsMultiplayer/cache` and logs under its `logs` directory. These survive removal of the extracted package. Close the owned game before reviewing or removing those copies. **Normal saves, the user profile and Steam Cloud are not isolated**; back up valuable data before launch. Do not remove the game's save folders as part of uninstall.

@@ -3,17 +3,17 @@
   "selfContainedDotNet": true,
   "inGameConnectionUi": true,
   "playableMultiplayer": false,
-  "builtUtc": "2026-11-16T08:06:28.9332481Z",
+  "builtUtc": "2026-11-16T10:14:58.5086543Z",
   "files": [
     {
       "path": "bridge/Wsm.Bridge.dll",
-      "bytes": 613376,
-      "sha256": "869da4dce9078186df695166310dee41572220393e34a2f4636db6d849ad3aa6"
+      "bytes": 639488,
+      "sha256": "f95ffb1b44199140fb815ff88035c4282bc98aa2b4332224fe7437ce30995605"
     },
     {
       "path": "bridge/Wsm.InGame.Runtime.dll",
-      "bytes": 3899904,
-      "sha256": "1054b70aae5ceef2d6f3fed787266ea8bccc0672f5a8fa9cc1e3758611c49eb5"
+      "bytes": 3977728,
+      "sha256": "9f7d0c88f56eea2068c3d3c4c6a1a10bc155c7f0ae004a071dcf2d19cd6ab9a3"
     },
     {
       "path": "launcher/clretwrc.dll",
@@ -958,12 +958,12 @@
     {
       "path": "launcher/Wsm.Launcher.dll",
       "bytes": 86016,
-      "sha256": "783f85be7ebf1ea201f39b163caadea614cced73b2ecd4d3f52c548cabb4b269"
+      "sha256": "af5aa5e2e03da5a62497fcfdb67ec430939bdb9f3f92f000996a5b2215f801ff"
     },
     {
       "path": "launcher/Wsm.Launcher.exe",
       "bytes": 162304,
-      "sha256": "26da00d8898d66fb8b1e2f79b7ea5c88063210d222b86f599aded14d9c8d5e06"
+      "sha256": "a1c338cd838045723688cb3326c2626dbaa7702ce35d7d0b0bc29e0bc119f8c6"
     },
     {
       "path": "launcher/Wsm.Launcher.runtimeconfig.json",
@@ -2998,12 +2998,12 @@
     {
       "path": "lobby/Wsm.App.dll",
       "bytes": 54784,
-      "sha256": "11ce41e4172c7319dc90d220dea9be061b725f0382cde0d15d635e6ac926a785"
+      "sha256": "53e125843b855ea70778afe817c7b126a0e4474d25d90ec2229c21a720257146"
     },
     {
       "path": "lobby/Wsm.App.exe",
       "bytes": 162304,
-      "sha256": "90f3879deecb81c9c0aedc16890859a2c5f7140852add34adf499e5d5e4e36a4"
+      "sha256": "8e84fb12583ab232b54e1d9a4ee10d6b19e9a9c9aaf8544ccb1147196f6b1688"
     },
     {
       "path": "lobby/Wsm.App.runtimeconfig.json",
@@ -3013,7 +3013,7 @@
     {
       "path": "lobby/Wsm.Contracts.dll",
       "bytes": 9216,
-      "sha256": "a928a40975b4d0450b106ab4c99029a34ccddf342b027c570b1024ef9c7c00fb"
+      "sha256": "f46da255ae7835e829c5e34e358cf4c9fd75c8462686ac3fbe804e2f2d92773c"
     },
     {
       "path": "lobby/Wsm.Launcher.deps.json",
@@ -3023,12 +3023,12 @@
     {
       "path": "lobby/Wsm.Launcher.dll",
       "bytes": 86016,
-      "sha256": "783f85be7ebf1ea201f39b163caadea614cced73b2ecd4d3f52c548cabb4b269"
+      "sha256": "af5aa5e2e03da5a62497fcfdb67ec430939bdb9f3f92f000996a5b2215f801ff"
     },
     {
       "path": "lobby/Wsm.Launcher.exe",
       "bytes": 162304,
-      "sha256": "26da00d8898d66fb8b1e2f79b7ea5c88063210d222b86f599aded14d9c8d5e06"
+      "sha256": "a1c338cd838045723688cb3326c2626dbaa7702ce35d7d0b0bc29e0bc119f8c6"
     },
     {
       "path": "lobby/Wsm.Launcher.runtimeconfig.json",
@@ -3038,7 +3038,7 @@
     {
       "path": "lobby/Wsm.Lobby.dll",
       "bytes": 51712,
-      "sha256": "5fd2abe85afbd3d78642d34c7c69c5241b4d743df0f649bb0fd59db40bc6fb19"
+      "sha256": "1983ebe036757edd5dc456d522b82db33fbb3d452c425c27fa293c6deb1f6402"
     },
     {
       "path": "lobby/zh-Hans/Microsoft.VisualBasic.Forms.resources.dll",

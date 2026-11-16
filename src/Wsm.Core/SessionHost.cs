@@ -8,7 +8,7 @@ namespace Wsm.Core;
 
 public sealed class SessionHost : IAsyncDisposable
 {
-    public const int ProtocolVersion = 4;
+    public const int ProtocolVersion = 5;
     public Encounter Encounter { get; } = new();
     private readonly SessionSettings settings;
     private readonly string password;
@@ -20,6 +20,16 @@ public sealed class SessionHost : IAsyncDisposable
     private readonly object snapshotLock = new();
     private long lastSnapshotTick = -1;
     private readonly object rewardGate = new();
+    private readonly Dictionary<Guid, string> playerNames = [];
+    public Guid HostPlayerId { get; } = Guid.NewGuid();
+    public PlayerName[] PlayerNames { get { lock (rewardGate) return RosterLocked(); } }
+    private PlayerName[] RosterLocked() => [new(HostPlayerId, hostName), .. playerNames.OrderBy(p => p.Key).Select(p => new PlayerName(p.Key, p.Value))];
+    private readonly string hostName;
+    private void BroadcastRosterLocked()
+    {
+        var bytes = Peer.Encode(new Message("roster", Roster: RosterLocked()));
+        foreach (var target in peers.Values) target.EnqueueRoster(bytes);
+    }
     private readonly Dictionary<Guid, RewardEvent> rewardEvents = [];
     private int rewardCollectionCount;
     private sealed class RewardEvent(RewardReceipt source, bool shared)
@@ -49,12 +59,13 @@ public sealed class SessionHost : IAsyncDisposable
     public int ConnectedClients => peers.Count;
     public int Port => ((IPEndPoint)listener.LocalEndpoint).Port;
     public SessionSettings Settings => settings;
-    public SessionHost(SessionSettings settings, string password, int port = 0, IPAddress? bindAddress = null)
+    public SessionHost(SessionSettings settings, string password, int port = 0, IPAddress? bindAddress = null, string? displayName = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         settings.Validate();
         if (password is null || password.Length > 256) throw new ArgumentException("Invalid password.");
         this.settings = settings;
+        hostName = DisplayNames.Sanitize(displayName);
         this.password = password;
         slots = new SemaphoreSlim(settings.MaxClients);
         listener = new TcpListener(bindAddress ?? IPAddress.Loopback, port);
@@ -91,7 +102,7 @@ public sealed class SessionHost : IAsyncDisposable
         try
         {
             var join = await peer.ReadAsync(stop.Token);
-            if (join.Type != "join" || join.Version != ProtocolVersion || join.Password != password)
+            if (join.Type != "join" || join.Version != ProtocolVersion || join.Password != password || !DisplayNames.Valid(join.DisplayName))
             {
                 await peer.SendAsync(new Message("reject", Error: "Invalid join, version or password."), stop.Token);
                 return;
@@ -100,7 +111,7 @@ public sealed class SessionHost : IAsyncDisposable
             await peer.SendAsync(new Message("welcome", Version: ProtocolVersion, PlayerId: player, Settings: settings), stop.Token);
             peer.StartKeepalive();
             outbound = new Outbound(peer, stop.Token);
-            lock (rewardGate) peers[player] = outbound;
+            lock (rewardGate) { peers[player] = outbound; playerNames.Add(player, join.DisplayName!); BroadcastRosterLocked(); }
             joined.Writer.TryWrite(player);
             while (!stop.IsCancellationRequested)
             {
@@ -118,7 +129,7 @@ public sealed class SessionHost : IAsyncDisposable
         finally
         {
             lock (rewardGate)
-                if (player != Guid.Empty && peers.TryRemove(player, out _)) disconnected.Writer.TryWrite(player);
+                if (player != Guid.Empty && peers.TryRemove(player, out _)) { playerNames.Remove(player); BroadcastRosterLocked(); disconnected.Writer.TryWrite(player); }
             peer.Dispose();
             try { if (outbound is not null) await outbound.StopAsync(); await peer.StopKeepaliveAsync(); }
             finally { slots.Release(); }
@@ -188,6 +199,7 @@ public sealed class SessionHost : IAsyncDisposable
         private readonly object gate = new();
         private readonly Queue<byte[]> controls = new();
         private byte[]? snapshot;
+        private byte[]? roster;
         private bool closed;
         private readonly Channel<bool> wake = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
         private readonly Task worker;
@@ -196,6 +208,7 @@ public sealed class SessionHost : IAsyncDisposable
         public (long Sent, bool Writing) Status => (Interlocked.Read(ref sent), Volatile.Read(ref writing) != 0);
         public Outbound(Peer peer, CancellationToken token) { this.peer = peer; worker = RunAsync(token); }
         public void Enqueue(byte[] bytes) { lock (gate) { if (closed) return; snapshot = bytes; wake.Writer.TryWrite(true); } }
+        public void EnqueueRoster(byte[] bytes) { lock (gate) { if (closed) return; roster = bytes; wake.Writer.TryWrite(true); } }
         public bool EnqueueControl(byte[] bytes)
         {
             lock (gate)
@@ -217,7 +230,8 @@ public sealed class SessionHost : IAsyncDisposable
                         lock (gate)
                         {
                             if (closed) return;
-                            if (controls.Count > 0) bytes = controls.Dequeue();
+                            if (roster is not null) { bytes = roster; roster = null; }
+                            else if (controls.Count > 0) bytes = controls.Dequeue();
                             else { bytes = snapshot; snapshot = null; }
                         }
                         if (bytes is null) break;

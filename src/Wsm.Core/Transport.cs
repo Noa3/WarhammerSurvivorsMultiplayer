@@ -4,7 +4,7 @@ using System.Net.Sockets;
 
 namespace Wsm.Core;
 
-internal sealed record Message(string Type, int Version = 0, string? Password = null, Guid PlayerId = default, SessionSettings? Settings = null, PlayerInput? Input = null, UpgradeChoice? Upgrade = null, WorldSnapshot? Snapshot = null, string? Error = null, RewardReceipt? Reward = null, Guid Nonce = default);
+internal sealed record Message(string Type, int Version = 0, string? Password = null, Guid PlayerId = default, SessionSettings? Settings = null, PlayerInput? Input = null, UpgradeChoice? Upgrade = null, WorldSnapshot? Snapshot = null, string? Error = null, RewardReceipt? Reward = null, Guid Nonce = default, string? DisplayName = null, PlayerName[]? Roster = null);
 
 internal sealed class Peer : IDisposable
 {
@@ -64,6 +64,7 @@ internal sealed class Peer : IDisposable
             Message message;
             try { message = JsonSerializer.Deserialize(data, WireJsonContext.Default.Message) ?? throw new InvalidDataException("Empty frame."); }
             catch (JsonException ex) { throw new InvalidDataException("Invalid JSON.", ex); }
+            if (message.Type == "roster" || (message.Type == "join" && message.Version == SessionHost.ProtocolVersion)) ValidateNamesShape(data, message.Type);
             if (message.Type is not ("ping" or "pong")) return message;
             if (heartbeatStop is null) throw new InvalidDataException("Heartbeat before handshake.");
             ValidateHeartbeat(data, message);
@@ -79,6 +80,28 @@ internal sealed class Peer : IDisposable
                     pendingPong = null;
                 }
             }
+        }
+    }
+    private static void ValidateNamesShape(byte[] data, string type)
+    {
+        using var json = JsonDocument.Parse(data);
+        var fields = json.RootElement.EnumerateObject().ToArray();
+        if (fields.Count(p => p.NameEquals("Type")) != 1) throw new InvalidDataException("Duplicate message type.");
+        var field = type == "join" ? "DisplayName" : "Roster";
+        if (fields.Count(p => p.NameEquals(field)) != 1) throw new InvalidDataException("Missing or duplicate name field.");
+        var value = fields.Single(p => p.NameEquals(field)).Value;
+        if (type == "join")
+        {
+            if (value.ValueKind != JsonValueKind.String) throw new InvalidDataException("Invalid display name.");
+            return;
+        }
+        if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() is < 1 or > 9) throw new InvalidDataException("Invalid roster.");
+        foreach (var item in value.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object) throw new InvalidDataException("Invalid roster entry.");
+            var entries = item.EnumerateObject().ToArray();
+            if (entries.Length != 2 || entries.Count(p => p.NameEquals("PlayerId")) != 1 || entries.Count(p => p.NameEquals("Name")) != 1)
+                throw new InvalidDataException("Invalid roster entry fields.");
         }
     }
     private static void ValidateHeartbeat(byte[] data, Message message)

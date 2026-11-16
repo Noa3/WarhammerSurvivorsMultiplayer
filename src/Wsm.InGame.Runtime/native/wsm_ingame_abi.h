@@ -55,6 +55,12 @@ int wsm_ingame_host(int port, int lanBind);
 int wsm_ingame_join(const uint8_t* ipUtf8, int ipLength, int port);
 int wsm_ingame_leave(void);
 int wsm_ingame_status(uint8_t* buffer, int capacity);
+// Optional display names: strict UTF-8 input, sanitized and frozen at queue time.
+// Getters use the status buffer convention; roster is host-first, newline-separated,
+// has no trailing newline, and is empty when disconnected. Names are not identity.
+int wsm_ingame_set_player_name(const uint8_t* nameUtf8, int length);
+int wsm_ingame_local_player_name(uint8_t* buffer, int capacity);
+int wsm_ingame_player_names(uint8_t* buffer, int capacity);
 int wsm_ingame_last_error(uint8_t* buffer, int capacity);
 int wsm_ingame_state(void);
 int wsm_ingame_peer_count(void);

@@ -13,6 +13,8 @@ public sealed class SessionClient : IAsyncDisposable
     private readonly object disposeLock = new();
     private Task? disposeTask;
     public Guid PlayerId { get; }
+    private PlayerName[] playerNames = [];
+    public PlayerName[] PlayerNames => (PlayerName[])Volatile.Read(ref playerNames).Clone();
     public SessionSettings Settings { get; }
     public LocalProgression Progression { get; }
     private readonly Channel<RewardReceipt> rewards = Channel.CreateBounded<RewardReceipt>(new BoundedChannelOptions(128) { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true });
@@ -24,7 +26,7 @@ public sealed class SessionClient : IAsyncDisposable
     public ChannelReader<WorldSnapshot> Snapshots => snapshots.Reader;
     private SessionClient(Peer peer, Guid playerId, SessionSettings settings)
     { this.peer = peer; PlayerId = playerId; Settings = settings; Progression = new(playerId); }
-    public static async Task<SessionClient> ConnectAsync(IPAddress address, int port, string password, CancellationToken token = default)
+    public static async Task<SessionClient> ConnectAsync(IPAddress address, int port, string password, CancellationToken token = default, string? displayName = null)
     {
         ArgumentNullException.ThrowIfNull(address);
         if (password is null || password.Length > 256) throw new ArgumentException("Invalid password.");
@@ -35,9 +37,11 @@ public sealed class SessionClient : IAsyncDisposable
             deadline.CancelAfter(TimeSpan.FromSeconds(30));
             await tcp.ConnectAsync(address, port, deadline.Token);
             var peer = new Peer(tcp);
-            await peer.SendAsync(new Message("join", Version: SessionHost.ProtocolVersion, Password: password), deadline.Token);
+            await peer.SendAsync(new Message("join", Version: SessionHost.ProtocolVersion, Password: password, DisplayName: DisplayNames.Sanitize(displayName)), deadline.Token);
             var response = await peer.ReadAsync(deadline.Token);
-            if (response.Type != "welcome" || response.Version != SessionHost.ProtocolVersion || response.PlayerId == Guid.Empty || response.Settings is null)
+            if (response.Type == "welcome" && response.Version != SessionHost.ProtocolVersion)
+                throw new InvalidDataException($"Incompatible protocol version {response.Version}; expected {SessionHost.ProtocolVersion}.");
+            if (response.Type != "welcome" || response.PlayerId == Guid.Empty || response.Settings is null)
                 throw new InvalidDataException(response.Error ?? "Invalid welcome.");
             response.Settings.Validate();
             var client = new SessionClient(peer, response.PlayerId, response.Settings);
@@ -67,7 +71,9 @@ public sealed class SessionClient : IAsyncDisposable
             while (!stop.IsCancellationRequested)
             {
                 var message = await peer.ReadAsync(stop.Token);
-                if (message.Type == "snapshot" && message.Snapshot is { Valid: true } snapshot) snapshots.Writer.TryWrite(snapshot);
+                if (message.Type == "roster" && DisplayNames.ValidRoster(message.Roster, Settings.MaxClients, PlayerId))
+                    Volatile.Write(ref playerNames, message.Roster!);
+                else if (message.Type == "snapshot" && message.Snapshot is { Valid: true } snapshot) snapshots.Writer.TryWrite(snapshot);
                 else if (message.Type == "reward" && message.Reward is { Valid: true } reward && reward.RecipientId == PlayerId)
                 {
                     lock (rewardLock)
@@ -90,7 +96,7 @@ public sealed class SessionClient : IAsyncDisposable
             }
         }
         catch (Exception ex) { if (!stop.IsCancellationRequested || ex is not (OperationCanceledException or ObjectDisposedException or IOException or SocketException)) error = ex; }
-        finally { peer.Dispose(); await peer.StopKeepaliveAsync(); snapshots.Writer.TryComplete(error); rewards.Writer.TryComplete(error); }
+        finally { Volatile.Write(ref playerNames, []); peer.Dispose(); await peer.StopKeepaliveAsync(); snapshots.Writer.TryComplete(error); rewards.Writer.TryComplete(error); }
     }
     public ValueTask DisposeAsync()
     {

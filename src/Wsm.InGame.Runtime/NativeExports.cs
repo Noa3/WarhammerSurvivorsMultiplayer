@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Channels;
+using Wsm.Core;
 
 namespace Wsm.InGame.Runtime;
 
@@ -25,7 +26,7 @@ public static class NativeExports
 
     private enum CommandKind { Host, Join }
 
-    private readonly record struct Command(CommandKind Kind, int Port, bool LanBind, string Address, long Generation, CancellationToken Cancellation);
+    private readonly record struct Command(CommandKind Kind, int Port, bool LanBind, string Address, string Name, long Generation, CancellationToken Cancellation);
 
     private static readonly IngameSessionController Controller = new();
     internal static IngameSessionController ControllerForTests => Controller;
@@ -39,6 +40,9 @@ public static class NativeExports
     private static int stopped;
     private static readonly object CommandGate = new();
     private static long commandGeneration;
+    private static string desiredName = "Player";
+    private static int namesSuppressed;
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static Task leaveBarrier = Task.CompletedTask;
     private static CancellationTokenSource commandCancellation = new();
 
@@ -85,6 +89,31 @@ public static class NativeExports
         catch { return Unavailable; }
     }
 
+    /// <summary>Set a bounded untrusted name for the next queued admission.</summary>
+    [UnmanagedCallersOnly(EntryPoint = "wsm_ingame_set_player_name", CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe int SetPlayerName(byte* bytes, int length)
+    {
+        try
+        {
+            if (Volatile.Read(ref stopped) != 0) return Unavailable;
+            if (length < 0 || length > 4096 || (bytes is null && length != 0)) return InvalidArgument;
+            string text;
+            try { text = length == 0 ? "" : StrictUtf8.GetString(new ReadOnlySpan<byte>(bytes, length)); }
+            catch (DecoderFallbackException) { return InvalidArgument; }
+            lock (CommandGate) desiredName = DisplayNames.Sanitize(text);
+            return Accepted;
+        }
+        catch { return Unavailable; }
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "wsm_ingame_local_player_name", CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe int LocalPlayerName(byte* buffer, int capacity)
+    { try { return WriteUtf8(Encoding.UTF8.GetBytes(Volatile.Read(ref namesSuppressed) != 0 ? "" : Controller.LocalPlayerName), buffer, capacity); } catch { return Unavailable; } }
+
+    [UnmanagedCallersOnly(EntryPoint = "wsm_ingame_player_names", CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe int PlayerNames(byte* buffer, int capacity)
+    { try { return WriteUtf8(Encoding.UTF8.GetBytes(Volatile.Read(ref namesSuppressed) != 0 ? "" : Controller.PlayerNames), buffer, capacity); } catch { return Unavailable; } }
+
     /// <summary>Starts hosting in the current process. port 0 binds an ephemeral port.</summary>
     [UnmanagedCallersOnly(EntryPoint = "wsm_ingame_host", CallConvs = [typeof(CallConvCdecl)])]
     public static int Host(int port, int lanBind)
@@ -95,7 +124,7 @@ public static class NativeExports
             if (port is < 0 or > 65535 || lanBind is not (0 or 1)) return InvalidArgument;
             EnsureWorker();
             lock (CommandGate)
-                return Queue.Writer.TryWrite(new Command(CommandKind.Host, port, lanBind == 1, "", commandGeneration, commandCancellation.Token)) ? Accepted : QueueFull;
+                return Queue.Writer.TryWrite(new Command(CommandKind.Host, port, lanBind == 1, "", desiredName, commandGeneration, commandCancellation.Token)) ? Accepted : QueueFull;
         }
         catch { return Unavailable; }
     }
@@ -117,7 +146,7 @@ public static class NativeExports
             if (!IngameSessionController.TryParseIpv4(address, out _)) return InvalidArgument;
             EnsureWorker();
             lock (CommandGate)
-                return Queue.Writer.TryWrite(new Command(CommandKind.Join, port, false, address, commandGeneration, commandCancellation.Token)) ? Accepted : QueueFull;
+                return Queue.Writer.TryWrite(new Command(CommandKind.Join, port, false, address, desiredName, commandGeneration, commandCancellation.Token)) ? Accepted : QueueFull;
         }
         catch { return Unavailable; }
     }
@@ -140,6 +169,7 @@ public static class NativeExports
         lock (CommandGate)
         {
             ++commandGeneration;
+            Volatile.Write(ref namesSuppressed, 1);
             var preceding = leaveBarrier;
             var oldCancellation = commandCancellation;
             commandCancellation = new CancellationTokenSource();
@@ -281,9 +311,10 @@ public static class NativeExports
                     lock (CommandGate)
                     {
                         if (command.Generation != commandGeneration) continue;
+                        Volatile.Write(ref namesSuppressed, 0);
                         operation = command.Kind == CommandKind.Host
-                            ? Controller.HostAsync(command.Port, command.LanBind, command.Cancellation)
-                            : Controller.JoinAsync(command.Address, command.Port, command.Cancellation);
+                            ? Controller.HostAsync(command.Port, command.LanBind, command.Cancellation, command.Name)
+                            : Controller.JoinAsync(command.Address, command.Port, command.Cancellation, command.Name);
                     }
                     await operation.ConfigureAwait(false);
                 }

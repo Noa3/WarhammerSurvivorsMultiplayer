@@ -12,6 +12,8 @@ struct InGameMenuActions {
     std::string (*status)(void*, const std::string& language) = nullptr;
     void (*camera_mode)(void*, bool shared) = nullptr;
     std::string (*camera_status)(void*, const std::string& language) = nullptr;
+    std::string (*local_player_name)(void*, const std::string& language) = nullptr;
+    std::string (*player_names)(void*, const std::string& language) = nullptr;
 };
 
 // All operations, including destruction, must run on the verified Unity main thread.

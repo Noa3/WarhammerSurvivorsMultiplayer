@@ -1,0 +1,7 @@
+# Steam persona IL2CPP fixture
+
+This standalone Unity 6000.0.74f1 Windows IL2CPP player compiles the production reader, IL2CPP API and main-thread guard into its own plugin. Its `Steamworks` assembly contains controlled test doubles with the relevant public wrapper shapes. It neither imports the game's assembly nor calls or initializes Steam.
+
+Run `python tests/UnitySteamPersonaFixture/run_fixture.py` on Windows with CMake, Visual Studio 18 2026 C++ tools and the Unity editor installed at the path in the script. The runner creates a unique project, player, native build and logs below `TMPDIR` when configured, otherwise below the repository's `.local/steam-persona-runs` directory; it retains these outputs. It requires a successful Unity BuildReport, validates the installed plugin hash, checks every named case exactly once, and requires player exit 0 and the final success marker. These tests do not establish actual game integration, live Steam behavior, or account authentication.
+
+`initialize` may fail when optional Steam metadata is absent; callers must not treat this as a failure of unrelated in-game UI. `read` changes output only on `Captured`. `NotReady` covers Steam not running, a zero user handle, null/empty/whitespace-only persona. Exceptions, invalid UTF-16, embedded NUL, excessive length and thread failures return `Error` without changing output. The reader limits input to 1024 UTF-16 code units and uses Windows Unicode whitespace classification for trimming.

@@ -19,6 +19,9 @@ public sealed class MenuFixture : MonoBehaviour
     [DllImport("ingame_ui_fixture", CallingConvention = CallingConvention.Cdecl)] static extern void fixture_fail_language_label();
     [DllImport("ingame_ui_fixture", CallingConvention = CallingConvention.Cdecl)] static extern void fixture_camera_callbacks(int mode, int state);
     [DllImport("ingame_ui_fixture", CallingConvention = CallingConvention.Cdecl)] static extern void fixture_camera_effective(int state);
+    [DllImport("ingame_ui_fixture", CallingConvention = CallingConvention.Cdecl)] static extern void fixture_name_state(int state);
+    [DllImport("ingame_ui_fixture", CallingConvention = CallingConvention.Cdecl)] static extern void fixture_name_callbacks(int local, int roster);
+    [DllImport("ingame_ui_fixture", CallingConvention = CallingConvention.Cdecl)] static extern int fixture_init_without_name_metadata();
     int failures;
     void Check(string name, bool ok) { Debug.Log("MENU_FIXTURE " + name + "=" + (ok ? "PASS" : "FAIL")); if (!ok) ++failures; }
     static Rect ScreenBounds(GameObject go) {
@@ -34,6 +37,19 @@ public sealed class MenuFixture : MonoBehaviour
             bounds.Contains(a.min) && bounds.Contains(a.max) && bounds.Contains(b.min) && bounds.Contains(b.max) &&
             bounds.Contains(c.min) && bounds.Contains(c.max) && !a.Overlaps(b) && !a.Overlaps(c) && !b.Overlaps(c) &&
             !a.Overlaps(d) && !b.Overlaps(d) && !c.Overlaps(d);
+    }
+    static bool NamesLayoutFits(GameObject panel, Text localName, GameObject namesHud) {
+        if (!panel || !localName || !namesHud) return false;
+        var bounds = ScreenBounds(panel); var local = ScreenBounds(localName.gameObject); var hud = ScreenBounds(namesHud);
+        var title = ScreenBounds(GameObject.Find("WSM Title"));
+        if (!bounds.Contains(local.min) || !bounds.Contains(local.max) || local.Overlaps(title) || hud.Overlaps(bounds) ||
+            hud.xMin < 0 || hud.yMin < 0 || hud.xMax > Screen.width || hud.yMax > Screen.height) return false;
+        foreach (var label in namesHud.GetComponentsInChildren<Text>()) {
+            var labelBounds = ScreenBounds(label.gameObject);
+            if (!hud.Contains(labelBounds.min) || !hud.Contains(labelBounds.max) || label.raycastTarget ||
+                label.preferredWidth > label.rectTransform.rect.width + .1f) return false;
+        }
+        return true;
     }
     IEnumerator Start()
     {
@@ -84,6 +100,36 @@ public sealed class MenuFixture : MonoBehaviour
         var port = GameObject.Find("WSM Port")?.GetComponent<InputField>();
         Check("open_owns_event_system", EventSystem.current && EventSystem.current.gameObject.name == "WSM Owned EventSystem");
         Check("render_tree", canvas && host && join && leave && address && port && cameraOwn && cameraShared && cameraStatus);
+        var localName = GameObject.Find("WSM Local Player Name")?.GetComponent<Text>();
+        var namesHud = GameObject.Find("WSM Player Names HUD");
+        var firstName = GameObject.Find("WSM Player Name 0")?.GetComponent<Text>();
+        var secondName = GameObject.Find("WSM Player Name 1")?.GetComponent<Text>();
+        Check("player_names_render_actual_callbacks", localName && namesHud && firstName && secondName &&
+            localName.text == "You: Fixture Captain" && firstName.text == "Fixture Captain" && secondName.text == "Rune <b>Hunter</b>");
+        Check("player_names_are_literal_not_rich_text", firstName && secondName && !firstName.supportRichText && !secondName.supportRichText);
+        if (localName && namesHud && firstName && secondName) {
+            Check("player_names_do_not_capture_input", !namesHud.GetComponent<Image>().raycastTarget && !firstName.raycastTarget && !secondName.raycastTarget && !localName.raycastTarget);
+            fixture_name_state(1); fixture_tick();
+            Check("player_names_empty_uses_local_fallback", localName.text == "You: Player" && firstName.text == "Player" && !secondName.gameObject.activeSelf);
+            fixture_name_callbacks(0, 0); fixture_tick();
+            Check("player_names_callback_removal_from_empty_hides", !namesHud.activeSelf && !localName.gameObject.activeSelf);
+            fixture_name_callbacks(1, 1); fixture_name_state(0); fixture_tick();
+            Check("player_names_callbacks_restore_same_widgets", namesHud.activeSelf && localName.gameObject.activeSelf &&
+                firstName.text == "Fixture Captain" && secondName.gameObject.activeSelf && GameObject.Find("WSM Player Name 0").GetComponent<Text>() == firstName);
+            fixture_name_state(4); fixture_tick();
+            Check("player_names_departure_clears_remote_row", firstName.text == "Fixture Captain" && !secondName.gameObject.activeSelf);
+            fixture_name_state(2); fixture_tick();
+            Check("player_names_long_names_fit_without_utf16_split", firstName.text.EndsWith("…", StringComparison.Ordinal) && firstName.preferredWidth <= 296.1f && localName.preferredWidth <= 540.1f);
+            fixture_name_state(3); fixture_tick();
+            firstName.font.RequestCharactersInTexture("勇者", firstName.fontSize);
+            Check("player_names_unicode_text_preserved", firstName.text == "勇者" && localName.text == "You: 勇者");
+            Check("player_names_cjk_glyphs_in_english_ui", firstName.font.HasCharacter('勇') && firstName.font.HasCharacter('者'));
+            fixture_name_state(0); fixture_tick();
+        }
+        fixture_input(0, 0, 0, 0, 0); fixture_input(1, 0, 0, 0, 0); fixture_input(1, 0, 1, 0, 0);
+        Check("player_names_visible_with_menu_closed", namesHud && namesHud.activeInHierarchy && localName && !localName.gameObject.activeInHierarchy);
+        fixture_input(1, 0, 0, 0, 0); fixture_input(1, 0, 1, 0, 0); fixture_input(0, 0, 0, 0, 0);
+        Check("player_names_menu_reopens_same_label", localName && localName.gameObject.activeInHierarchy && GameObject.Find("WSM Local Player Name").GetComponent<Text>() == localName);
         if (!canvas || !host || !join || !leave || !address || !port || !cameraOwn || !cameraShared || !cameraStatus) { fixture_shutdown(); Finish(); yield break; }
         var title = GameObject.Find("WSM Title").GetComponent<Text>();
         Check("game_language_english_initial", title.text == "Co-op connection" && host.GetComponentInChildren<Text>().text == "Host");
@@ -92,6 +138,8 @@ public sealed class MenuFixture : MonoBehaviour
         fixture_tick(); yield return null;
         Check("game_language_german_status", GameObject.Find("WSM Status").GetComponent<Text>().text == "Fixture: keine Netzwerkverbindung");
         Check("game_language_german_live", title.text == "Koop-Verbindung" && host.GetComponentInChildren<Text>().text == "Hosten");
+        Check("player_names_localized_labels_not_personas", localName && localName.text == "Du: Fixture Captain" &&
+            firstName && firstName.text == "Fixture Captain" && GameObject.Find("WSM Player Names Title").GetComponent<Text>().text == "Spieler");
         Check("language_switch_preserves_input_and_actions", address.text == "192.0.2.7" && port.text == "8123" && fixture_count(0) == 0 && fixture_count(1) == 0 && fixture_count(2) == 0);
         I2.Loc.LocalizationManager.CurrentLanguageCode = "en-US";
         fixture_tick(); yield return null;
@@ -152,10 +200,24 @@ public sealed class MenuFixture : MonoBehaviour
         Check("canvas_scale_restored", Mathf.Abs(canvas.GetComponent<Canvas>().scaleFactor - 1f) < .01f);
         var status = GameObject.Find("WSM Status")?.GetComponent<Text>();
         Check("camera_layout_default", CameraLayoutFits(GameObject.Find("WSM Coop Panel"), cameraOwn, cameraShared, cameraStatus.gameObject, status.gameObject));
+        Check("player_names_layout_default", NamesLayoutFits(GameObject.Find("WSM Coop Panel"), localName, namesHud));
         Screen.SetResolution(640, 360, FullScreenMode.Windowed);
         for (int i = 0; i < 15; ++i) { fixture_tick(); yield return null; }
         Check("camera_layout_minimum", Screen.width == 640 && Screen.height == 360 &&
             CameraLayoutFits(GameObject.Find("WSM Coop Panel"), cameraOwn, cameraShared, cameraStatus.gameObject, status.gameObject));
+        fixture_name_state(2); fixture_tick(); yield return null;
+        Check("player_names_four_long_names_layout_minimum", namesHud && namesHud.GetComponentsInChildren<Text>().Length == 5 &&
+            NamesLayoutFits(GameObject.Find("WSM Coop Panel"), localName, namesHud));
+        fixture_name_state(5); fixture_tick(); yield return null;
+        var nineNames = namesHud ? namesHud.GetComponentsInChildren<Text>() : new Text[0];
+        bool nineNamesMatch = nineNames.Length == 10;
+        for (int i = 0; i < 9; ++i) {
+            var row = GameObject.Find("WSM Player Name " + i)?.GetComponent<Text>();
+            nineNamesMatch &= row && row.text == (i == 0 ? "Host" : "Guest " + i) && !row.supportRichText && !row.raycastTarget;
+        }
+        Check("player_names_all_nine_core_members_literal", nineNamesMatch);
+        Check("player_names_nine_members_layout_minimum", nineNamesMatch && NamesLayoutFits(GameObject.Find("WSM Coop Panel"), localName, namesHud));
+        fixture_name_state(0); fixture_tick();
         Screen.SetResolution(1280, 720, FullScreenMode.Windowed);
         for (int i = 0; i < 15; ++i) { fixture_tick(); yield return null; }
         Check("live_status", status && status.text == "Fixture: no network connection");
@@ -238,6 +300,23 @@ public sealed class MenuFixture : MonoBehaviour
         yield return null;
         Check("shutdown_restores_game_event_system", EventSystem.current && EventSystem.current.gameObject.name == "Fixture EventSystem");
         Check("shutdown_destroyed_root", !GameObject.Find("WSM Coop Canvas"));
+        int missingNamesInit = fixture_init_without_name_metadata();
+        if (missingNamesInit == 0) fixture_tick();
+        // Reinitialization creates new graphics; let Unity register their raycasts.
+        yield return null;
+        Canvas.ForceUpdateCanvases();
+        Check("player_names_missing_literal_metadata_keeps_menu", missingNamesInit == 0 && GameObject.Find("WSM Hosten") && !GameObject.Find("WSM Player Names HUD") && !GameObject.Find("WSM Local Player Name"));
+        int hostBeforeMissingNames = fixture_count(0);
+        var fallbackHost = GameObject.Find("WSM Hosten");
+        if (missingNamesInit == 0 && fallbackHost) {
+            var fallbackPoint = RectTransformUtility.WorldToScreenPoint(null, fallbackHost.transform.position);
+            fixture_click(fallbackPoint.x, fallbackPoint.y);
+        }
+        Check("player_names_missing_metadata_host_action_works", missingNamesInit == 0 && fixture_count(0) == hostBeforeMissingNames + 1);
+        fixture_name_callbacks(0, 0); fixture_tick();
+        Check("player_names_legacy_without_literal_metadata_keeps_menu", missingNamesInit == 0 && GameObject.Find("WSM Hosten") && !GameObject.Find("WSM Player Names HUD"));
+        fixture_shutdown(); yield return null;
+        Check("player_names_missing_metadata_shutdown_clean", !GameObject.Find("WSM Coop Canvas") && EventSystem.current && EventSystem.current.gameObject.name == "Fixture EventSystem");
         if (Array.IndexOf(Environment.GetCommandLineArgs(), "--force-failure") >= 0) Check("forced_failure", false);
         Finish();
     }

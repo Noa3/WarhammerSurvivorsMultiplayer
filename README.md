@@ -27,6 +27,10 @@ IP and port fields support selection, cursor movement, deletion, and copy/paste.
 
 See the [Windows package guide](distribution/README.md) for files, cache locations and integrity checks. Vortex deployment remains experimental and is not certified; see the [distribution guide](docs/DISTRIBUTION.md).
 
+## Player names
+
+Your Steam display name is used automatically when the game's Steam session is ready, with a generic fallback otherwise. The co-op panel shows your local name, and a compact in-game list shows connected participants even with the panel closed. Names are display-only, not Steam authentication or character ownership. See [player names and compatibility](docs/PLAYER_NAMES.md); all peers need the matching name-aware build.
+
 ## Camera preview
 
 The local primary actor uses **Own camera** by default. The in-game panel also offers **Shared camera**, which centers on living actors rather than including dead figures. Own-player following can spectate a living actor after local death and return after revival.

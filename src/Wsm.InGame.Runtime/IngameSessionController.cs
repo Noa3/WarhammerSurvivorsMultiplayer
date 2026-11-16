@@ -54,10 +54,35 @@ public sealed partial class IngameSessionController : IAsyncDisposable
 
     /// <summary>Most recent immutable status. Polling this from any thread is safe.</summary>
     public IngameStatus Status => Volatile.Read(ref current);
+    /// <summary>Connected human display names, host first; no gameplay events are consumed.</summary>
+    public string PlayerNames
+    {
+        get
+        {
+            lock (gate)
+            {
+                if (active is not { } session || current.State is not (IngameState.Hosting or IngameState.Connected)) return "";
+                var names = session.Host?.PlayerNames ?? session.Client?.PlayerNames ?? [];
+                return string.Join("\n", names.Select(p => p.Name));
+            }
+        }
+    }
+    public string LocalPlayerName
+    {
+        get
+        {
+            lock (gate)
+            {
+                if (active is not { } session || current.State is not (IngameState.Hosting or IngameState.Connected)) return "";
+                return session.Client is { } client && client.PlayerNames.Length == 0 ? "" : session.Name;
+            }
+        }
+    }
 
-    private sealed class Session(int generation)
+    private sealed class Session(int generation, string name)
     {
         public int Generation { get; } = generation;
+        public string Name { get; } = name;
         public GameplayMailbox Gameplay { get; } = new(generation);
         public Channel<GameplayRequest> GameplayOutgoing { get; } = Channel.CreateBounded<GameplayRequest>(
             new BoundedChannelOptions(32) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true });
@@ -77,10 +102,10 @@ public sealed partial class IngameSessionController : IAsyncDisposable
     }
 
     /// <summary>Starts hosting. A port of 0 binds an ephemeral port; the result is in <see cref="Status"/>.</summary>
-    public Task<TransitionResult> HostAsync(int port, bool bindToLan, CancellationToken token = default) =>
-        Task.Run(() => { BeforeOperationStart?.Invoke(); return HostCoreAsync(port, bindToLan, token); });
+    public Task<TransitionResult> HostAsync(int port, bool bindToLan, CancellationToken token = default, string? displayName = null) =>
+        Task.Run(() => { BeforeOperationStart?.Invoke(); return HostCoreAsync(port, bindToLan, token, DisplayNames.Sanitize(displayName)); });
 
-    private async Task<TransitionResult> HostCoreAsync(int port, bool bindToLan, CancellationToken token)
+    private async Task<TransitionResult> HostCoreAsync(int port, bool bindToLan, CancellationToken token, string displayName)
     {
         if (port is < 0 or > 65535) return TransitionResult.InvalidArgument;
         if (Volatile.Read(ref disposed) != 0) return TransitionResult.Failed;
@@ -95,7 +120,7 @@ public sealed partial class IngameSessionController : IAsyncDisposable
                 if (disposed != 0) return TransitionResult.Failed;
                 if (active is not null || pendingRelease is not null || retainedGameplay?.HasReliable == true) return TransitionResult.Busy;
                 retainedGameplay = null;
-                session = new Session(++generation);
+                session = new Session(++generation, displayName);
                 active = session;
             }
             var endpoint = $"{(bindToLan ? "0.0.0.0" : "127.0.0.1")}:{port}";
@@ -103,7 +128,7 @@ public sealed partial class IngameSessionController : IAsyncDisposable
             try
             {
                 token.ThrowIfCancellationRequested();
-                var host = new SessionHost(settings, SessionPassword, port, bindToLan ? IPAddress.Any : IPAddress.Loopback);
+                var host = new SessionHost(settings, SessionPassword, port, bindToLan ? IPAddress.Any : IPAddress.Loopback, displayName);
                 session.Host = host; // Own the object even when Start or the admission step fails.
                 host.Start();
                 BeforeResourceCommit?.Invoke();
@@ -151,10 +176,10 @@ public sealed partial class IngameSessionController : IAsyncDisposable
     }
 
     /// <summary>Joins a host by IPv4 literal. DNS is intentionally unsupported.</summary>
-    public Task<TransitionResult> JoinAsync(string address, int port, CancellationToken token = default) =>
-        Task.Run(() => JoinCoreAsync(address, port, token));
+    public Task<TransitionResult> JoinAsync(string address, int port, CancellationToken token = default, string? displayName = null) =>
+        Task.Run(() => JoinCoreAsync(address, port, token, DisplayNames.Sanitize(displayName)));
 
-    private async Task<TransitionResult> JoinCoreAsync(string address, int port, CancellationToken token)
+    private async Task<TransitionResult> JoinCoreAsync(string address, int port, CancellationToken token, string displayName)
     {
         if (!TryParseIpv4(address, out var ipAddress) || port is < 1 or > 65535) return TransitionResult.InvalidArgument;
         if (Volatile.Read(ref disposed) != 0) return TransitionResult.Failed;
@@ -169,7 +194,7 @@ public sealed partial class IngameSessionController : IAsyncDisposable
                 if (disposed != 0) return TransitionResult.Failed;
                 if (active is not null || pendingRelease is not null || retainedGameplay?.HasReliable == true) return TransitionResult.Busy;
                 retainedGameplay = null;
-                session = new Session(++generation);
+                session = new Session(++generation, displayName);
                 active = session;
             }
             var endpoint = $"{ipAddress}:{port}";
@@ -178,7 +203,7 @@ public sealed partial class IngameSessionController : IAsyncDisposable
             {
                 using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token, session.Cancellation.Token);
                 deadline.CancelAfter(ConnectTimeout);
-                var client = await SessionClient.ConnectAsync(ipAddress, port, SessionPassword, deadline.Token).ConfigureAwait(false);
+                var client = await SessionClient.ConnectAsync(ipAddress, port, SessionPassword, deadline.Token, displayName).ConfigureAwait(false);
                 session.Client = client; // Own it before any later admission step can fail.
                 BeforeResourceCommit?.Invoke();
                 bool owned;

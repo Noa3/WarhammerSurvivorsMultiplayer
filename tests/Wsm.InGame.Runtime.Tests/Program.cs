@@ -15,6 +15,8 @@ var filter = args.Length > 0 ? args[0] : null;
 var matched = 0;
 foreach (var (name, test) in new (string, Func<Task>)[]
 {
+    ("player names roster over TCP", PlayerNamesTests.Roster),
+    ("player names native ABI and frozen queue", PlayerNamesAbiTests.Run),
     ("host and guest roundtrip with cleanup", HostAndGuestRoundtrip),
     ("mailbox reliable events survive continuous input", GameplayBridgeTests.MailboxFairness),
     ("idle reward polling avoids ledger allocation", GameplayBridgeTests.IdleRewardPollingAllocation),

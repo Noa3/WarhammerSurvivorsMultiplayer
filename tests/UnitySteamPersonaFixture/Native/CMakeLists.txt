@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(steam_fixture LANGUAGES CXX)
+get_filename_component(ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
+add_library(steam_fixture SHARED fixture.cpp "${ROOT}/native/src/steam_persona_reader.cpp" "${ROOT}/native/src/main_thread_guard.cpp" "${ROOT}/native/src/il2cpp_api.cpp")
+target_include_directories(steam_fixture PRIVATE "${ROOT}/native/include")
+target_compile_features(steam_fixture PRIVATE cxx_std_17)

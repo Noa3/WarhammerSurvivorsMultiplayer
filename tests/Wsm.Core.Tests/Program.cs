@@ -1,13 +1,14 @@
 using System.Net;
 using Wsm.Core;
 
+if (args is ["--player-names"]) { await PlayerNamesRegression.Run(); return; }
 if (args is ["--send-context"]) { await SendContextRegression.Run(); return; }
 if (args is ["--reward-capacity"]) { await RewardCapacityRegression.Run(); return; }
 if (args is ["--keepalive-context"]) { await BlockedContextRegression.Run(); return; }
 if (args is ["--keepalive-idle"]) { await KeepaliveRegression.Idle(); return; }
 if (args is ["--keepalive"]) { await KeepaliveRegression.Run(); return; }
 if (args is ["--incoming-oversize"]) { await IncomingOversize(); return; }
-if (args.Length != 0) throw new ArgumentException("Supported filters: --send-context, --reward-capacity, --keepalive-context, --keepalive-idle, --keepalive, --incoming-oversize");
+if (args.Length != 0) throw new ArgumentException("Supported filters: --player-names, --send-context, --reward-capacity, --keepalive-context, --keepalive-idle, --keepalive, --incoming-oversize");
 
 var player = Guid.NewGuid();
 var progress = new LocalProgression(player);
@@ -71,16 +72,18 @@ await using (var raw = await OpenRaw(host.Port, timeout.Token))
 }
 await using (var raw = await OpenRaw(host.Port, timeout.Token))
 {
-    await SendRaw(raw, "{\"Type\":\"join\",\"Version\":4,\"Password\":\"secret\"}", timeout.Token);
+    await SendRaw(raw, $"{{\"Type\":\"join\",\"Version\":{SessionHost.ProtocolVersion},\"Password\":\"secret\",\"DisplayName\":\"Player\"}}", timeout.Token);
     var welcome = await ReadRaw(raw, timeout.Token);
     Check(welcome.Contains("welcome", StringComparison.Ordinal), "raw welcome");
+    _ = await ReadRaw(raw, timeout.Token); // roster precedes the hostile frame
     await SendRaw(raw, "{\"Type\":\"snapshot\"}", timeout.Token);
     Check(await raw.ReadAsync(new byte[1], timeout.Token) == 0, "client snapshot rejected");
 }
 await using (var raw = await OpenRaw(host.Port, timeout.Token))
 {
-    await SendRaw(raw, "{\"Type\":\"join\",\"Version\":4,\"Password\":\"secret\"}", timeout.Token);
+    await SendRaw(raw, $"{{\"Type\":\"join\",\"Version\":{SessionHost.ProtocolVersion},\"Password\":\"secret\",\"DisplayName\":\"Player\"}}", timeout.Token);
     _ = await ReadRaw(raw, timeout.Token);
+    _ = await ReadRaw(raw, timeout.Token); // roster
     await SendRaw(raw, $"{{\"Type\":\"input\",\"Input\":{{\"PlayerId\":\"{client.PlayerId}\",\"X\":0,\"Y\":0}}}}", timeout.Token);
     Check(await raw.ReadAsync(new byte[1], timeout.Token) == 0, "spoofed owner rejected");
     Check(!host.Commands.TryRead(out _), "spoofed input not delivered");
@@ -93,7 +96,7 @@ Check(!host.ConnectedPlayerIds.Contains(client.PlayerId), "disconnect cleanup");
 Console.WriteLine("PASS rules and protocol rejection");
 
 var failures = new List<string>();
-foreach (var (name, test) in new (string, Func<Task>)[] { ("oversize incoming frame", IncomingOversize), ("oversize without peers", Oversize), ("malformed host JSON", MalformedHost), ("network failure regressions", NetworkRegression.Run), ("shared enemy health contract", SharedEnemyContract), ("shared encounter and private rewards", EncounterRegression.Run), ("snapshot encounter capacity", SnapshotSafetyRegression.Capacity), ("snapshot tick ordering", SnapshotSafetyRegression.TickOrder), ("team XP and replay", PolicyRegression.TeamXp), ("personal XP collection", PolicyRegression.PersonalXp), ("malformed policy", PolicyRegression.MalformedSettings), ("team partial enqueue retry", PolicyRegression.PartialEnqueue), ("reward capacity atomicity", RewardCapacityRegression.Run), ("keepalive TCP regressions", KeepaliveRegression.Run) })
+foreach (var (name, test) in new (string, Func<Task>)[] { ("player names TCP roster", PlayerNamesRegression.Run), ("oversize incoming frame", IncomingOversize), ("oversize without peers", Oversize), ("malformed host JSON", MalformedHost), ("network failure regressions", NetworkRegression.Run), ("shared enemy health contract", SharedEnemyContract), ("shared encounter and private rewards", EncounterRegression.Run), ("snapshot encounter capacity", SnapshotSafetyRegression.Capacity), ("snapshot tick ordering", SnapshotSafetyRegression.TickOrder), ("team XP and replay", PolicyRegression.TeamXp), ("personal XP collection", PolicyRegression.PersonalXp), ("malformed policy", PolicyRegression.MalformedSettings), ("team partial enqueue retry", PolicyRegression.PartialEnqueue), ("reward capacity atomicity", RewardCapacityRegression.Run), ("keepalive TCP regressions", KeepaliveRegression.Run) })
 {
     try { await test(); Console.WriteLine("PASS " + name); }
     catch (Exception ex) { failures.Add(name + ": " + ex); Console.WriteLine("FAIL " + failures[^1]); }
@@ -146,7 +149,7 @@ static async Task InvalidHostFrame(string? payload)
         using var tcp = await listener.AcceptTcpClientAsync(timeout.Token);
         var stream = tcp.GetStream();
         _ = await ReadRaw(stream, timeout.Token);
-        await SendRaw(stream, $"{{\"Type\":\"welcome\",\"Version\":4,\"PlayerId\":\"{Guid.NewGuid()}\",\"Settings\":{{\"MaxClients\":1,\"DeathMode\":0,\"BotCount\":0,\"BotDifficulty\":1,\"Policy\":{System.Text.Json.JsonSerializer.Serialize(new Wsm.Contracts.CoopPolicy())}}}}}", timeout.Token);
+        await SendRaw(stream, $"{{\"Type\":\"welcome\",\"Version\":{SessionHost.ProtocolVersion},\"PlayerId\":\"{Guid.NewGuid()}\",\"Settings\":{{\"MaxClients\":1,\"DeathMode\":0,\"BotCount\":0,\"BotDifficulty\":1,\"Policy\":{System.Text.Json.JsonSerializer.Serialize(new Wsm.Contracts.CoopPolicy())}}}}}", timeout.Token);
         var client = await connect;
         if (payload is null) { var header = new byte[4]; System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(header, 262145); await stream.WriteAsync(header, timeout.Token); }
         else await SendRaw(stream, payload, timeout.Token);

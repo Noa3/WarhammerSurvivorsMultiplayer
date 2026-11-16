@@ -119,7 +119,7 @@ internal static class PolicyRegression
         using var slow = new TcpClient { ReceiveBufferSize = 1024 };
         await slow.ConnectAsync(IPAddress.Loopback, host.Port, timeout.Token);
         using var slowPeer = new Peer(slow);
-        await slowPeer.SendAsync(new Message("join", Version: SessionHost.ProtocolVersion, Password: "x"), timeout.Token);
+        await slowPeer.SendAsync(new Message("join", Version: SessionHost.ProtocolVersion, Password: "x", DisplayName: "Player"), timeout.Token);
         var slowId = (await slowPeer.ReadAsync(timeout.Token)).PlayerId;
         await host.Joined.ReadAsync(timeout.Token);
         await using var healthy = await SessionClient.ConnectAsync(IPAddress.Loopback, host.Port, "x", timeout.Token);

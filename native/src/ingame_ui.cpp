@@ -50,6 +50,11 @@ struct InGameMenu::Impl {
     Il2CppObject *camera_own_rect = nullptr, *camera_shared_rect = nullptr, *camera_status_text = nullptr;
     bool camera_buttons_visible = false;
     bool camera_status_initialized = false;
+    Il2CppObject *local_name_text = nullptr, *names_hud = nullptr, *names_title = nullptr;
+    std::array<Il2CppObject*, 9> name_rows{};
+    bool names_initialized = false;
+    unsigned last_name_capabilities = 0;
+    std::string last_local_name, last_roster, last_names_language;
     bool visible = true, foreground = false, mouse_down = false, f6_down = false;
     Text status_override = Text::Count;
     std::string last_status, last_camera_status, language = "en";
@@ -239,6 +244,80 @@ struct InGameMenu::Impl {
         auto result = text(parent, name, std::string(i18n::text(id, language)), size, pos, font_size);
         localized_labels.emplace_back(result, id); return result;
     }
+    Il2CppObject* name_text(Il2CppObject* parent, const char* name, Vec2 size, Vec2 pos, int font_size) {
+        auto component = text(parent, name, "", size, pos, font_size);
+        bool rich_text = false; set_value("rich_text", component, &rich_text);
+        return component;
+    }
+    static bool valid_name(const std::string& value) {
+        if (value.empty() || value.size() > 192) return false;
+        for (unsigned char c : value) if (c < 32 || c == 127) return false;
+        return MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0) > 0;
+    }
+    float text_width(Il2CppObject* component, const std::string& value) {
+        set_string("text", component, value);
+        auto boxed = required(call("preferred_width", component), "name width");
+        auto type = api.object_get_class(boxed);
+        if (!type || !same(api.class_get_namespace(type), "System") || !same(api.class_get_name(type), "Single")) fail("name width is not Single");
+        auto raw = api.object_unbox(boxed); if (!raw) fail("cannot unbox name width");
+        auto width = *static_cast<float*>(raw);
+        if (!std::isfinite(width) || width < 0) fail("invalid name width");
+        return width;
+    }
+    void fit_name(Il2CppObject* component, const std::string& value, float width) {
+        if (text_width(component, value) <= width) return;
+        std::vector<std::size_t> ends{0};
+        for (std::size_t i = 1; i <= value.size(); ++i)
+            if (i == value.size() || (static_cast<unsigned char>(value[i]) & 0xc0) != 0x80) ends.push_back(i);
+        std::size_t low = 0, high = ends.size() - 1;
+        while (low < high) {
+            const auto middle = (low + high + 1) / 2;
+            if (text_width(component, value.substr(0, ends[middle]) + "…") <= width) low = middle;
+            else high = middle - 1;
+        }
+        set_string("text", component, value.substr(0, ends[low]) + "…");
+    }
+    void update_names(const InGameMenuActions& actions) {
+        if (!names_hud) return;
+        const auto local = actions.local_player_name ? actions.local_player_name(actions.context, language) : std::string{};
+        const auto roster = actions.player_names ? actions.player_names(actions.context, language) : std::string{};
+        const unsigned capabilities = (actions.local_player_name ? 1u : 0u) | (actions.player_names ? 2u : 0u);
+        if (names_initialized && capabilities == last_name_capabilities && local == last_local_name &&
+            roster == last_roster && language == last_names_language) return;
+        bool show_local = actions.local_player_name != nullptr;
+        bool show_hud = show_local || actions.player_names != nullptr;
+        set_value("active", call("component_object", local_name_text), &show_local);
+        set_value("active", names_hud, &show_hud);
+        if (show_local) fit_name(local_name_text, i18n::format(Text::LocalPlayerName, language,
+            {{"name", valid_name(local) ? local : std::string(i18n::text(Text::PlayerFallback, language))}}), 540);
+        std::vector<std::string> names;
+        if (roster.size() <= 4096) {
+            std::size_t start = 0;
+            while (start < roster.size()) {
+                auto end = roster.find('\n', start);
+                const auto name = roster.substr(start, end == std::string::npos ? end : end - start);
+                if (!valid_name(name) || names.size() == name_rows.size()) { names.clear(); break; }
+                names.push_back(name);
+                if (end == std::string::npos) break;
+                start = end + 1;
+            }
+        }
+        if (names.empty() && show_local) names.push_back(valid_name(local) ? local : std::string(i18n::text(Text::PlayerFallback, language)));
+        const float height = static_cast<float>(names.size()) * 22 + 34;
+        Vec2 size{320, height}, position{176, height / 2 + 12};
+        set_value("size", rectangle(names_hud), &size); set_value("position", rectangle(names_hud), &position);
+        position = {0, height / 2 - 15}; set_value("position", rectangle(call("component_object", names_title)), &position);
+        for (std::size_t i = 0; i < name_rows.size(); ++i) {
+            bool active = i < names.size();
+            set_value("active", call("component_object", name_rows[i]), &active);
+            if (!active) continue;
+            position = {0, height / 2 - 39 - static_cast<float>(i) * 22};
+            set_value("position", rectangle(call("component_object", name_rows[i])), &position);
+            fit_name(name_rows[i], names[i], 296);
+        }
+        last_local_name = local; last_roster = roster; last_names_language = language;
+        last_name_capabilities = capabilities; names_initialized = true;
+    }
     std::string read_language() {
         if (!methods.count("current_language")) return "en";
         // Read only the game's getter. Never change game language or PlayerPrefs.
@@ -393,6 +472,7 @@ struct InGameMenu::Impl {
         method("font_size", "Text", "set_fontSize", "System.Void", {"System.Int32"});
         method("alignment", "Text", "set_alignment", "System.Void", {"UnityEngine.TextAnchor"});
         method("text", "Text", "set_text", "System.Void", {"System.String"});
+        method("rich_text", "Text", "set_supportRichText", "System.Void", {"System.Boolean"}, false, false);
         method("input_readonly", "InputField", "set_readOnly", "System.Void", {"System.Boolean"});
         method("preferred_width", "Text", "get_preferredWidth", "System.Single", {});
         method("input_text_set", "InputField", "set_text", "System.Void", {"System.String"});
@@ -503,6 +583,9 @@ struct InGameMenu::Impl {
         set_ref("target_graphic", tab_button, tab_bg); label(tab, "WSM Tab Text", Text::Tab, {120, 40}, {0, 0}, 16); tab_rect = rectangle(tab);
         panel = make_go("WSM Coop Panel", root, {600, 500}, {0, 0});
         image(panel, {0.05f, 0.07f, 0.10f, 0.97f});
+        // Never render untrusted names unless literal-text rendering is supported.
+        if (methods.count("rich_text"))
+            local_name_text = name_text(panel, "WSM Local Player Name", {550, 28}, {0, 197}, 17);
         label(panel, "WSM Title", Text::Title, {550, 40}, {0, 145}, 25);
         label(panel, "WSM Address Label", Text::Address, {340, 30}, {-85, 99}, 18);
         label(panel, "WSM Port Label", Text::Port, {120, 30}, {190, 99}, 18);
@@ -521,6 +604,14 @@ struct InGameMenu::Impl {
         set_value("active", call("component_object", camera_own_rect), &hidden);
         set_value("active", call("component_object", camera_shared_rect), &hidden);
         camera_status_text = text(panel, "WSM Camera Status", std::string(i18n::text(Text::CameraUnavailable, language)), {550, 36}, {0, -226}, 16);
+        if (methods.count("rich_text")) {
+            names_hud = make_go("WSM Player Names HUD", root, {320, 56}, {176, 40}, {0, 0});
+            auto names_background = image(names_hud, {0.05f, 0.07f, 0.10f, 0.75f});
+            bool raycast_names = false; set_value("raycast", names_background, &raycast_names);
+            names_title = label(names_hud, "WSM Player Names Title", Text::PlayerNames, {300, 20}, {0, 13}, 14);
+            for (std::size_t i = 0; i < name_rows.size(); ++i)
+                name_rows[i] = name_text(names_hud, ("WSM Player Name " + std::to_string(i)).c_str(), {300, 20}, {0, -9 - static_cast<float>(i) * 22}, 16);
+        }
         endpoint_measure = text(panel, "WSM Endpoint Measure", "", {0, 0}, {0, -10000}, 19);
         Color transparent{1, 1, 1, 0}; set_value("color", endpoint_measure, &transparent);
         ensure_event_system();
@@ -674,6 +765,7 @@ struct InGameMenu::Impl {
         // Reference-size scaling keeps the same menu readable on ultrawide/4K displays.
         float scale = std::max(0.5f, std::min(integer("screen_width") / 1280.f, integer("screen_height") / 720.f));
         if (scale != last_scale) { editing = nullptr; set_value("scale_factor", canvas, &scale); last_scale = scale; }
+        update_names(a);
         std::string current = status_override == Text::Count ? (a.status ? a.status(a.context, language) : std::string(i18n::text(Text::NotConnected, language))) : std::string(i18n::text(status_override, language));
         if (current != last_status) { set_string("text", status_text, current); last_status = current; }
         const bool camera_available = a.camera_mode != nullptr;

@@ -1,9 +1,26 @@
 #include "wsm/ingame_runtime.h"
 #include "wsm/ingame_localization.h"
 #include <array>
+#include <algorithm>
 #include <filesystem>
 
 namespace wsm {
+namespace {
+bool valid_utf8(const std::string& value) {
+    return value.empty() || MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
+        static_cast<int>(value.size()), nullptr, 0) > 0;
+}
+std::string read_names(int (__cdecl* read)(unsigned char*, int), int limit) {
+    if (!read) return {};
+    std::array<unsigned char, 4097> buffer;
+    buffer.fill(0x7f);
+    const int count = read(buffer.data(), limit + 1);
+    if (count < 0 || count > limit || buffer[static_cast<std::size_t>(count)] != 0 ||
+        std::find(buffer.begin(), buffer.begin() + count, 0) != buffer.begin() + count) return {};
+    std::string result(reinterpret_cast<const char*>(buffer.data()), static_cast<std::size_t>(count));
+    return valid_utf8(result) ? result : std::string{};
+}
+}
 bool InGameRuntime::load(const std::wstring& path, std::string& error) {
     error.clear();
     if (ready()) { error = "Networking runtime is already loaded."; return false; }
@@ -38,6 +55,9 @@ bool InGameRuntime::load(const std::wstring& path, std::string& error) {
     peer_count_ = reinterpret_cast<decltype(peer_count_)>(GetProcAddress(loaded, "wsm_ingame_peer_count"));
     bound_port_ = reinterpret_cast<decltype(bound_port_)>(GetProcAddress(loaded, "wsm_ingame_bound_port"));
     last_error_ = reinterpret_cast<decltype(last_error_)>(GetProcAddress(loaded, "wsm_ingame_last_error"));
+    set_player_name_ = reinterpret_cast<decltype(set_player_name_)>(GetProcAddress(loaded, "wsm_ingame_set_player_name"));
+    local_player_name_ = reinterpret_cast<decltype(local_player_name_)>(GetProcAddress(loaded, "wsm_ingame_local_player_name"));
+    player_names_ = reinterpret_cast<decltype(player_names_)>(GetProcAddress(loaded, "wsm_ingame_player_names"));
     module_ = loaded; version_ = version; host_ = host; join_ = join; leave_ = leave; status_ = status;
     return true;
 }
@@ -53,6 +73,14 @@ int InGameRuntime::join(const std::string& address, int port) {
     return join_(reinterpret_cast<const unsigned char*>(address.data()), static_cast<int>(address.size()), port);
 }
 int InGameRuntime::leave() { return ready() ? leave_() : -3; }
+bool InGameRuntime::names_ready() const { return ready() && set_player_name_ && local_player_name_ && player_names_; }
+int InGameRuntime::set_player_name(const std::string& name) {
+    if (!names_ready()) return -2;
+    if (name.empty() || name.size() > 4096 || name.find('\0') != std::string::npos || !valid_utf8(name)) return -1;
+    return set_player_name_(reinterpret_cast<const unsigned char*>(name.data()), static_cast<int>(name.size()));
+}
+std::string InGameRuntime::local_player_name() const { return names_ready() ? read_names(local_player_name_, 192) : std::string{}; }
+std::string InGameRuntime::player_names() const { return names_ready() ? read_names(player_names_, 4096) : std::string{}; }
 std::string InGameRuntime::localized_status(const std::string& language, bool lan) const {
     using i18n::Text;
     const auto phrase = [&](Text id) { return std::string(i18n::text(id, language)); };
