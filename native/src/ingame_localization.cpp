@@ -5,11 +5,27 @@
 
 namespace wsm::i18n {
 namespace {
-constexpr std::size_t count = static_cast<std::size_t>(Text::Count);
+constexpr std::size_t count = static_cast<std::size_t>(Text::CameraOwn);
 using Row = std::array<std::string_view, count>;
 constexpr std::array<std::string_view, 13> languages = {
     "en", "de", "fr", "it", "es", "ja", "ko", "pl", "pt-BR", "ru", "zh-CN", "tr", "uk"
 };
+// Camera rows follow the six contiguous Text::Camera* entries.
+constexpr std::array<std::array<std::string_view, 6>, 13> camera_catalog = {{
+    {{"Own camera", "Shared camera", "Camera inactive", "Camera active", "Spectating", "Camera unavailable"}},
+    {{"Eigene Kamera", "Gemeinsame Kamera", "Kamera inaktiv", "Kamera aktiv", "Zuschauen", "Kamera nicht verfügbar"}},
+    {{"Caméra personnelle", "Caméra partagée", "Caméra inactive", "Caméra active", "Spectateur", "Caméra indisponible"}},
+    {{"Telecamera personale", "Telecamera condivisa", "Telecamera inattiva", "Telecamera attiva", "Spettatore", "Telecamera non disponibile"}},
+    {{"Cámara propia", "Cámara compartida", "Cámara inactiva", "Cámara activa", "Espectador", "Cámara no disponible"}},
+    {{"自分のカメラ", "共有カメラ", "カメラ無効", "カメラ有効", "観戦中", "カメラ使用不可"}},
+    {{"내 카메라", "공유 카메라", "카메라 비활성", "카메라 활성", "관전 중", "카메라 사용 불가"}},
+    {{"Własna kamera", "Wspólna kamera", "Kamera nieaktywna", "Kamera aktywna", "Obserwowanie", "Kamera niedostępna"}},
+    {{"Câmera própria", "Câmera compartilhada", "Câmera inativa", "Câmera ativa", "Assistindo", "Câmera indisponível"}},
+    {{"Своя камера", "Общая камера", "Камера неактивна", "Камера активна", "Наблюдение", "Камера недоступна"}},
+    {{"自己的镜头", "共享镜头", "镜头未启用", "镜头已启用", "观战中", "镜头不可用"}},
+    {{"Kendi kameram", "Ortak kamera", "Kamera etkin değil", "Kamera etkin", "İzleniyor", "Kamera kullanılamıyor"}},
+    {{"Власна камера", "Спільна камера", "Камера неактивна", "Камера активна", "Спостереження", "Камера недоступна"}}
+}};
 // Rows follow Text exactly; values remain static for the lifetime of the process.
 constexpr std::array<Row, 13> catalog = {{
 {{"Co-op [F6]", "Co-op connection", "IP address", "Port", "Host", "Join", "Leave",
@@ -195,11 +211,11 @@ std::string normalize_language(std::string_view code) {
 
 std::string_view text(Text id, std::string_view language) {
     auto index = static_cast<std::size_t>(id);
-    if (index >= count) index = static_cast<std::size_t>(Text::NetworkUnavailable);
+    if (index >= static_cast<std::size_t>(Text::Count)) index = static_cast<std::size_t>(Text::NetworkUnavailable);
     const auto canonical = normalize_language(language);
     for (std::size_t i = 0; i < languages.size(); ++i)
-        if (canonical == languages[i]) return catalog[i][index];
-    return catalog[0][index];
+        if (canonical == languages[i]) return index < count ? catalog[i][index] : camera_catalog[i][index - count];
+    return index < count ? catalog[0][index] : camera_catalog[0][index - count];
 }
 
 std::string format(Text id, std::string_view language,

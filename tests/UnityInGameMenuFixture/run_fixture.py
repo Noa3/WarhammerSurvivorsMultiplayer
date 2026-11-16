@@ -5,7 +5,8 @@ import sys
 
 root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 local = os.path.join(root, ".local")
-exe = os.path.join(local, "ingame-ui-v1-player", "Fixture.exe")
+player = os.environ.get("WSM_MENU_PLAYER", os.path.join(local, "ingame-ui-v1-player"))
+exe = os.path.join(player, "Fixture.exe")
 run = sys.argv[1] if len(sys.argv) > 1 else "positive"
 env = os.environ.copy()
 env["WSM_MENU_SCREENSHOT"] = os.path.join(local, "ingame-ui-v1-" + run + ".png")

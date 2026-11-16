@@ -17,8 +17,24 @@ public sealed class MenuFixture : MonoBehaviour
     [DllImport("ingame_ui_fixture", CallingConvention = CallingConvention.Cdecl)] static extern int fixture_address_is([MarshalAs(UnmanagedType.LPStr)] string expected);
     [DllImport("ingame_ui_fixture", CallingConvention = CallingConvention.Cdecl)] static extern void fixture_shutdown();
     [DllImport("ingame_ui_fixture", CallingConvention = CallingConvention.Cdecl)] static extern void fixture_fail_language_label();
+    [DllImport("ingame_ui_fixture", CallingConvention = CallingConvention.Cdecl)] static extern void fixture_camera_callbacks(int mode, int state);
+    [DllImport("ingame_ui_fixture", CallingConvention = CallingConvention.Cdecl)] static extern void fixture_camera_effective(int state);
     int failures;
     void Check(string name, bool ok) { Debug.Log("MENU_FIXTURE " + name + "=" + (ok ? "PASS" : "FAIL")); if (!ok) ++failures; }
+    static Rect ScreenBounds(GameObject go) {
+        var corners = new Vector3[4]; go.GetComponent<RectTransform>().GetWorldCorners(corners);
+        var min = RectTransformUtility.WorldToScreenPoint(null, corners[0]);
+        var max = RectTransformUtility.WorldToScreenPoint(null, corners[2]);
+        return Rect.MinMaxRect(min.x, min.y, max.x, max.y);
+    }
+    static bool CameraLayoutFits(GameObject panel, GameObject own, GameObject shared, GameObject state, GameObject networkState) {
+        var bounds = ScreenBounds(panel); var a = ScreenBounds(own); var b = ScreenBounds(shared);
+        var c = ScreenBounds(state); var d = ScreenBounds(networkState);
+        return bounds.xMin >= 0 && bounds.yMin >= 0 && bounds.xMax <= Screen.width && bounds.yMax <= Screen.height &&
+            bounds.Contains(a.min) && bounds.Contains(a.max) && bounds.Contains(b.min) && bounds.Contains(b.max) &&
+            bounds.Contains(c.min) && bounds.Contains(c.max) && !a.Overlaps(b) && !a.Overlaps(c) && !b.Overlaps(c) &&
+            !a.Overlaps(d) && !b.Overlaps(d) && !c.Overlaps(d);
+    }
     IEnumerator Start()
     {
         // Native UI must load or discover a Unity-owned font; the fixture does not preload one.
@@ -61,11 +77,14 @@ public sealed class MenuFixture : MonoBehaviour
         var host = GameObject.Find("WSM Hosten");
         var join = GameObject.Find("WSM Beitreten");
         var leave = GameObject.Find("WSM Verlassen");
+        var cameraOwn = GameObject.Find("WSM Camera Own");
+        var cameraShared = GameObject.Find("WSM Camera Shared");
+        var cameraStatus = GameObject.Find("WSM Camera Status")?.GetComponent<Text>();
         var address = GameObject.Find("WSM Address")?.GetComponent<InputField>();
         var port = GameObject.Find("WSM Port")?.GetComponent<InputField>();
         Check("open_owns_event_system", EventSystem.current && EventSystem.current.gameObject.name == "WSM Owned EventSystem");
-        Check("render_tree", canvas && host && join && leave && address && port);
-        if (!canvas || !host || !join || !leave || !address || !port) { fixture_shutdown(); Finish(); yield break; }
+        Check("render_tree", canvas && host && join && leave && address && port && cameraOwn && cameraShared && cameraStatus);
+        if (!canvas || !host || !join || !leave || !address || !port || !cameraOwn || !cameraShared || !cameraStatus) { fixture_shutdown(); Finish(); yield break; }
         var title = GameObject.Find("WSM Title").GetComponent<Text>();
         Check("game_language_english_initial", title.text == "Co-op connection" && host.GetComponentInChildren<Text>().text == "Host");
         address.text = "192.0.2.7"; port.text = "8123";
@@ -82,7 +101,8 @@ public sealed class MenuFixture : MonoBehaviour
         I2.Loc.LocalizationManager.CurrentLanguageCode = "fr";
         fixture_tick(); yield return null;
         fixture_tick(); yield return null;
-        Check("language_recovers_after_one_shot_setter_failure", title.text == "Connexion coop" && host.GetComponentInChildren<Text>().text == "Héberger");
+        Check("language_recovers_after_one_shot_setter_failure", title.text == "Connexion coop" && host.GetComponentInChildren<Text>().text == "Héberger" &&
+            cameraOwn.GetComponentInChildren<Text>().text == "Caméra personnelle" && cameraStatus.text == "Caméra inactive");
         I2.Loc.LocalizationManager.CurrentLanguageCode = "en";
         fixture_tick(); yield return null;
         var languageTitles = new[] {
@@ -93,10 +113,25 @@ public sealed class MenuFixture : MonoBehaviour
             new[] { "pt-BR", "Conexão cooperativa" }, new[] { "ru", "Кооперативное соединение" },
             new[] { "zh-CN", "合作连接" }, new[] { "tr", "Eşli bağlantı" }, new[] { "uk", "Спільне з'єднання" }
         };
+        var cameraLabels = new[] {
+            new[] { "Own camera", "Shared camera", "Camera inactive" }, new[] { "Eigene Kamera", "Gemeinsame Kamera", "Kamera inaktiv" },
+            new[] { "Caméra personnelle", "Caméra partagée", "Caméra inactive" }, new[] { "Telecamera personale", "Telecamera condivisa", "Telecamera inattiva" },
+            new[] { "Cámara propia", "Cámara compartida", "Cámara inactiva" }, new[] { "自分のカメラ", "共有カメラ", "カメラ無効" },
+            new[] { "내 카메라", "공유 카메라", "카메라 비활성" }, new[] { "Własna kamera", "Wspólna kamera", "Kamera nieaktywna" },
+            new[] { "Câmera própria", "Câmera compartilhada", "Câmera inativa" }, new[] { "Своя камера", "Общая камера", "Камера неактивна" },
+            new[] { "自己的镜头", "共享镜头", "镜头未启用" }, new[] { "Kendi kameram", "Ortak kamera", "Kamera etkin değil" },
+            new[] { "Власна камера", "Спільна камера", "Камера неактивна" }
+        };
+        int cameraLanguage = 0;
         foreach (var item in languageTitles) {
             I2.Loc.LocalizationManager.CurrentLanguageCode = item[0];
             fixture_tick(); yield return null;
             Check("language_title_" + item[0], title.text == item[1]);
+            var expectedCamera = cameraLabels[cameraLanguage++];
+            Check("camera_language_" + item[0], cameraOwn.GetComponentInChildren<Text>().text == expectedCamera[0] &&
+                cameraShared.GetComponentInChildren<Text>().text == expectedCamera[1] && cameraStatus.text == expectedCamera[2] &&
+                GameObject.Find("WSM Camera Own") == cameraOwn && GameObject.Find("WSM Camera Shared") == cameraShared &&
+                address.text == "127.0.0.1" && port.text == "7780");
         }
         I2.Loc.LocalizationManager.CurrentLanguageCode = "unknown-game-language";
         fixture_tick(); yield return null;
@@ -116,7 +151,34 @@ public sealed class MenuFixture : MonoBehaviour
         for (int i = 0; i < 15; ++i) { fixture_tick(); yield return null; }
         Check("canvas_scale_restored", Mathf.Abs(canvas.GetComponent<Canvas>().scaleFactor - 1f) < .01f);
         var status = GameObject.Find("WSM Status")?.GetComponent<Text>();
+        Check("camera_layout_default", CameraLayoutFits(GameObject.Find("WSM Coop Panel"), cameraOwn, cameraShared, cameraStatus.gameObject, status.gameObject));
+        Screen.SetResolution(640, 360, FullScreenMode.Windowed);
+        for (int i = 0; i < 15; ++i) { fixture_tick(); yield return null; }
+        Check("camera_layout_minimum", Screen.width == 640 && Screen.height == 360 &&
+            CameraLayoutFits(GameObject.Find("WSM Coop Panel"), cameraOwn, cameraShared, cameraStatus.gameObject, status.gameObject));
+        Screen.SetResolution(1280, 720, FullScreenMode.Windowed);
+        for (int i = 0; i < 15; ++i) { fixture_tick(); yield return null; }
         Check("live_status", status && status.text == "Fixture: no network connection");
+        var ownPoint = RectTransformUtility.WorldToScreenPoint(null, cameraOwn.transform.position);
+        var sharedPoint = RectTransformUtility.WorldToScreenPoint(null, cameraShared.transform.position);
+        Check("camera_own_click", fixture_click(ownPoint.x, ownPoint.y) == 1 && fixture_count(3) == 1 && fixture_count(4) == 0);
+        fixture_input(0, 0, 0, sharedPoint.x, sharedPoint.y);
+        fixture_input(1, 0, 0, sharedPoint.x, sharedPoint.y);
+        fixture_input(1, 1, 0, sharedPoint.x, sharedPoint.y);
+        fixture_input(1, 1, 0, sharedPoint.x, sharedPoint.y);
+        Check("camera_shared_input_edge_once", fixture_count(4) == 1 && fixture_count(3) == 1);
+        fixture_tick();
+        Check("camera_request_does_not_fake_status", cameraStatus.text == "Camera inactive");
+        var effectiveStates = new[] { "Camera inactive", "Camera active", "Spectating", "Camera unavailable" };
+        for (int i = 0; i < effectiveStates.Length; ++i) {
+            fixture_camera_effective(i); fixture_tick();
+            Check("camera_effective_" + i, cameraStatus.text == effectiveStates[i]);
+        }
+        fixture_camera_callbacks(0, 0); fixture_tick();
+        Check("camera_callbacks_absent", !cameraOwn.activeSelf && !cameraShared.activeSelf && cameraStatus.text == "Camera unavailable" &&
+            fixture_click(ownPoint.x, ownPoint.y) == 0 && fixture_count(3) == 1 && fixture_count(4) == 1);
+        fixture_camera_callbacks(1, 1); fixture_camera_effective(0); fixture_tick();
+        Check("camera_callbacks_restored_identity", cameraOwn.activeSelf && cameraShared.activeSelf && GameObject.Find("WSM Camera Own") == cameraOwn && cameraStatus.text == "Camera inactive");
         address.Select(); address.ActivateInputField();
         yield return null;
         address.text = "127.0.0.1";

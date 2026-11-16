@@ -20,6 +20,46 @@ int main(int argc, char** argv) {
     check("extended upgrade permission refused",SetEnvironmentVariableW(L"WSM_UPGRADE_PASS_HOOK_OPT_IN",L"1 ")&&!upgrade_hook_opt_in());
     check("restore process-local test flag",SetEnvironmentVariableW(L"WSM_UPGRADE_PASS_HOOK_OPT_IN",previous_hook_length?previous_hook_flag:nullptr)!=FALSE);
     check("inspect command", parse_command("inspect\r\n", 1234, command) && command.action == RosterAction::inspect);
+    {
+        wchar_t previous[128]{};
+        const DWORD length=GetEnvironmentVariableW(L"WSM_CAMERA_FOLLOW_OPT_IN",previous,128);
+        if(length>=128)return 1;
+        check("unset camera permission",SetEnvironmentVariableW(L"WSM_CAMERA_FOLLOW_OPT_IN",nullptr)!=FALSE);
+        for(const auto* route:{"cameraOpen:1234:41:own","cameraOpen:1234:0:shared","cameraMode:1234:own","cameraMode:1234:shared","cameraState:1234","cameraClose:1234"}) {
+            RosterCommand parsed;
+            const bool valid=parse_command(route,1234,parsed);
+            check(route,valid && !mutates_roster(parsed.action));
+            if(valid && (std::string_view(route).substr(0,10)=="cameraOpen" || std::string_view(route).substr(0,10)=="cameraMode")) {
+                ProbeContext refused;refused.command=parsed;execute_command(&refused);
+                check("camera mutation denied before runtime",!refused.action_succeeded && refused.action_error=="Camera follow requires separate WSM_CAMERA_FOLLOW_OPT_IN=1");
+            }
+        }
+        for(const auto* bad:{"cameraOpen:1235:1:own","cameraOpen:1234:-1:own","cameraOpen:1234:2147483648:own","cameraOpen:1234:1:own:extra","cameraOpen:1234:1:other","cameraMode:1234:own:extra","cameraMode:1235:shared","cameraMode:1234:","cameraState:1235","cameraState:1234:0","cameraClose:1234:0","cameraClose:-1234","cameraUnknown:1234"})
+            check(bad,!parse_command(bad,1234,command));
+        check("exact camera permission",SetEnvironmentVariableW(L"WSM_CAMERA_FOLLOW_OPT_IN",L"1")&&camera_opt_in());
+        for(const auto* flag:{L"true",L"1 ",L"01"}) {
+            check("camera rejects nonexact permission",SetEnvironmentVariableW(L"WSM_CAMERA_FOLLOW_OPT_IN",flag)&&!camera_opt_in());
+            for(const auto action:{RosterAction::camera_open,RosterAction::camera_mode}) {
+                ProbeContext refused;refused.command.action=action;execute_command(&refused);
+                check("nonexact camera permission denied before runtime",!refused.action_succeeded&&refused.action_error=="Camera follow requires separate WSM_CAMERA_FOLLOW_OPT_IN=1"&&!refused.camera);
+            }
+        }
+        for(const auto action:{RosterAction::camera_state,RosterAction::camera_close}) {
+            ProbeContext observation;observation.command.action=action;execute_command(&observation);
+            check("camera observation and cleanup proceed to thread guard without opt-in",!observation.action_succeeded&&observation.action_error=="Native OS thread mismatch.");
+        }
+        check("open preserves input and shared mode",parse_command("cameraOpen:1234:41:shared",1234,command)&&command.action==RosterAction::camera_open&&command.player==41&&command.camera_mode==CameraFollowMode::SharedAlive);
+        check("mode preserves own mode",parse_command("cameraMode:1234:own",1234,command)&&command.action==RosterAction::camera_mode&&command.camera_mode==CameraFollowMode::OwnPlayer);
+        ProbeContext cached;cached.command.action=RosterAction::camera_state;cached.camera_state_captured=true;
+        cached.camera_state.attached=true;cached.camera_state.has_target=true;cached.camera_state.spectating=true;
+        cached.camera_state.local_input_id=41;cached.camera_state.target_input_id=52;cached.camera_state.mode=CameraFollowMode::SharedAlive;
+        cached.camera_state.updates=(std::numeric_limits<std::uint64_t>::max)();cached.camera_state.x=1.00000012f;cached.camera_state.y=-4.25f;cached.camera_state.error="escaped \"error\"";
+        const auto json=result_json(cached,1);
+        check("cached camera status includes all fields losslessly",json.find("\"updates\":\"18446744073709551615\"")!=std::string::npos&&json.find("\"x\":1.00000012")!=std::string::npos&&json.find("\"targetInputId\":52")!=std::string::npos&&json.find("\"spectating\":true")!=std::string::npos&&json.find("escaped \\\"error\\\"")!=std::string::npos);
+        cached.camera_state_captured=false;
+        check("unavailable camera state suppresses stale fields",result_json(cached,2).find("\"camera\":{\"stateCaptured\":false}")!=std::string::npos);
+        check("restore camera permission",SetEnvironmentVariableW(L"WSM_CAMERA_FOLLOW_OPT_IN",length?previous:nullptr)!=FALSE);
+    }
     check("own PID enrollment", parse_command("enroll:1234:41", 1234, command) && command.action == RosterAction::enroll && command.player == 41);
     check("own PID rollback", parse_command("rollback:1234", 1234, command) && command.action == RosterAction::rollback);
     check("own PID menu player selection", parse_command("select:1234:41", 1234, command) && command.action == RosterAction::select_player && command.player == 41);

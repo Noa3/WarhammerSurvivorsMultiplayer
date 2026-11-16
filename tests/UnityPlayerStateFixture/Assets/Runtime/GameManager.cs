@@ -21,5 +21,11 @@ namespace VampireSurvivors.Framework {
   public List<VampireSurvivors.Objects.Characters.CharacterController> players=new List<VampireSurvivors.Objects.Characters.CharacterController>(); public VampireSurvivors.Objects.Stage stage;
   [Preserve] public List<VampireSurvivors.Objects.Characters.CharacterController> MainPlayers=>players;
   [Preserve] public VampireSurvivors.Objects.Stage Stage=>stage;
+  public Transform fixtureCameraTarget;
+  public bool fixtureNormalCamera=true;
+  [Preserve] public Transform CoopCameraTarget=>fixtureCameraTarget;
+  [Preserve] public System.Action ManualCameraTargetControl { get; set; }
+  [Preserve] public bool IsNormalCameraTarget()=>fixtureNormalCamera;
+  public void FixtureInvokeCameraTarget() { ManualCameraTargetControl?.Invoke(); }
  }
 }

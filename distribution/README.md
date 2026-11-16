@@ -1,6 +1,6 @@
 # Windows x64 connection preview
 
-**This is not a playable multiplayer release.** The package contains the native in-game connection panel, its in-process network runtime and a diagnostic launcher. The separate lobby application is retained as a developer tool. Starting a co-op game, real world replication and progress-preserving run reconnection are not implemented.
+**This is not a playable multiplayer release.** The package contains the native in-game connection panel, local camera preferences, its in-process network runtime and a diagnostic launcher. The separate lobby application is retained as a developer tool. Starting a co-op game, real world replication and progress-preserving run reconnection are not implemented.
 
 ## Start without building
 
@@ -11,6 +11,8 @@ Do not download just an executable. See the [distribution guide](../docs/DISTRIB
 Keep all accompanying files and subdirectories together. This is a self-contained .NET 10 Windows x64 distribution; a separate .NET SDK/runtime installation is not required for the packaged managed applications. Runtime licenses and third-party notices are included under `win-x64/licenses/` and must accompany redistribution.
 
 Open **Co-op [F6]** in the launched game. Host a port or join an IPv4 endpoint. Hosting listens on network interfaces; use only a trusted LAN/VPN and necessary private-network firewall access. For local testing, connect a separate peer to `127.0.0.1`. The connection UI follows the game language; see [localization](../docs/LOCALIZATION.md). See [connection help](../docs/CONNECTION_HELP.md).
+
+The panel offers **Own camera** by default and an optional **Shared camera** following living actors. These preferences do not create remote players or separate client views. Zoom and bounds remain under the game's control; exact stock single-player framing after a death is not verified.
 
 ## Game copies and saves
 

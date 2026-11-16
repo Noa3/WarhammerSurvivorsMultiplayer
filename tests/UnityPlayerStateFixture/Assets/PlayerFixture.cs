@@ -213,6 +213,7 @@ public sealed class PlayerFixture : MonoBehaviour {
   Check("upgrade_items_removed_component",fixture_upgrade(managed,os,39));DestroyImmediate(directContainer);page.ConfigureChoiceGroup(null);
   InputControlFixture.Run(Check,managed,os,gm);
   UpgradeChoiceFixture.Run(Check,managed,os,gm,page);
+  gm=CameraFixture.Run(Check,managed,os,gm);
   DestroyImmediate(gm.gameObject);Check("upgrade_no_manager",fixture_upgrade(managed,os,12));
   Check("equipment_no_manager",fixture_equipment(managed,os,1));
  }

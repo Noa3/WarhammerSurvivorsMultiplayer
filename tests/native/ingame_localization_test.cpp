@@ -65,6 +65,15 @@ int main() {
             require(value.size() < 700, "unexpectedly long translation");
         }
     }
+    constexpr std::array camera_ids{Text::CameraOwn, Text::CameraShared, Text::CameraInactive,
+                                    Text::CameraActive, Text::CameraSpectating, Text::CameraUnavailable};
+    for (auto language : langs) for (auto id : camera_ids) {
+        require(!text(id, language).empty(), "camera translation present");
+        require(utf8(text(id, language)), "camera translation UTF-8");
+    }
+    require(text(Text::CameraOwn, "en") == "Own camera", "own camera English");
+    require(text(Text::CameraShared, "de") == "Gemeinsame Kamera", "shared camera German");
+    require(text(Text::CameraUnavailable, "unknown") == text(Text::CameraUnavailable, "en"), "camera fallback");
     require(text(Text::Tab, "de") == "Koop [F6]", "German tab");
     require(text(Text::Title, "de") == "Koop-Verbindung", "German title");
     require(text(Text::Address, "de") == "IP-Adresse", "German address");

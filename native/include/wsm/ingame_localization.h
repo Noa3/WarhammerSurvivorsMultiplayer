@@ -12,7 +12,8 @@ enum class Text {
     LeaveUnavailable, HostUnavailable, JoinUnavailable, InvalidPort, MissingAddress,
     ActionRejected, NetworkMissing, NetworkUnavailable, HostingLan, HostingLocal,
     Connecting, Connected, HostLost, Refused, Timeout, Rejected, HostFull,
-    Unreachable, PortInUse, Busy, Invalid, Internal, UiError, Count
+    Unreachable, PortInUse, Busy, Invalid, Internal, UiError,
+    CameraOwn, CameraShared, CameraInactive, CameraActive, CameraSpectating, CameraUnavailable, Count
 };
 
 std::string normalize_language(std::string_view code);

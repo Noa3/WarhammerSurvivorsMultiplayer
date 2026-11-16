@@ -27,6 +27,12 @@ IP and port fields support selection, cursor movement, deletion, and copy/paste.
 
 See the [Windows package guide](distribution/README.md) for files, cache locations and integrity checks. Vortex deployment remains experimental and is not certified; see the [distribution guide](docs/DISTRIBUTION.md).
 
+## Camera preview
+
+The local primary actor uses **Own camera** by default. The in-game panel also offers **Shared camera**, which centers on living actors rather than including dead figures. Own-player following can spectate a living actor after local death and return after revival.
+
+These are local view controls, not independent network-client views or split-screen. Own/shared focus and the in-game mode controls have been exercised with game 2.1.6; the adapter keeps the game's zoom and bounds rather than guaranteeing pixel-identical single-player framing after a death. Network actors and their client-to-character mapping are still missing.
+
 ## Planned gameplay
 
 The intended co-op mode uses a shared world with synchronized enemies and health, while each player keeps their own progression and upgrade choices. The host will be able to fill vacant slots with bots and choose between spectating after death or ending the run on the first death.

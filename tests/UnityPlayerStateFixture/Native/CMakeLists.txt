@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(PlayerStateFixture LANGUAGES CXX)
-add_library(fixture SHARED fixture.cpp control_fixture.cpp upgrade_choice_fixture.cpp ../../../native/src/upgrade_choice_controller.cpp ../../../native/src/player_state_reader.cpp ../../../native/src/rewired_input_profile.cpp ../../../native/src/rewired_controller_session.cpp ../../../native/src/il2cpp_api.cpp ../../../native/src/main_thread_guard.cpp)
+add_library(fixture SHARED fixture.cpp control_fixture.cpp upgrade_choice_fixture.cpp camera_fixture.cpp ../../../native/src/player_camera_controller.cpp ../../../native/src/camera_follow_policy.cpp ../../../native/src/upgrade_choice_controller.cpp ../../../native/src/player_state_reader.cpp ../../../native/src/rewired_input_profile.cpp ../../../native/src/rewired_controller_session.cpp ../../../native/src/il2cpp_api.cpp ../../../native/src/main_thread_guard.cpp)
 target_include_directories(fixture PRIVATE ../../../native/include)
 target_compile_features(fixture PRIVATE cxx_std_17)
 target_compile_definitions(fixture PRIVATE WSM_PLAYER_STATE_TESTING)

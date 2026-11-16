@@ -2,6 +2,7 @@
 #include "wsm/ingame_ui.h"
 #include "wsm/ingame_runtime.h"
 #include "wsm/ingame_localization.h"
+#include "wsm/player_camera_controller.h"
 #include "wsm/main_thread_guard.h"
 #include "wsm/window_hook.h"
 #include <filesystem>
@@ -35,6 +36,12 @@ struct Context {
     Window window;
     wsm::MainThreadGuard guard;
     wsm::InGameRuntime runtime;
+    std::unique_ptr<wsm::PlayerCameraController> camera;
+    wsm::PlayerStateReader camera_lifecycle;
+    wsm::CameraFollowMode camera_mode = wsm::CameraFollowMode::OwnPlayer;
+    bool camera_initialized = false, camera_open = false, camera_failed = false;
+    bool camera_cleanup_pending = false;
+    std::string camera_error;
     // Created and destroyed only inside verified Unity callbacks. If the engine
     // window has already died, retain it until process exit instead of invoking
     // Unity from the worker during engine shutdown.
@@ -51,12 +58,82 @@ void host(void* raw, int port) { auto& c = *static_cast<Context*>(raw); command_
 void join(void* raw, const std::string& address, int port) { auto& c = *static_cast<Context*>(raw); command_result(c, c.runtime.join(address, port)); }
 void leave(void* raw) { auto& c = *static_cast<Context*>(raw); command_result(c, c.runtime.leave()); }
 std::string status(void* raw, const std::string& language) { auto& c = *static_cast<Context*>(raw); return c.command_failed ? std::string(wsm::i18n::text(wsm::i18n::Text::ActionRejected, language)) : c.runtime.localized_status(language); }
+void camera_mode(void* raw, bool shared) {
+    auto& c = *static_cast<Context*>(raw);
+    c.camera_mode = shared ? wsm::CameraFollowMode::SharedAlive : wsm::CameraFollowMode::OwnPlayer;
+    c.camera_failed = false;
+    c.camera_error.clear();
+    if (c.camera_initialized && !c.camera->set_mode(c.camera_mode, c.camera_error)) c.camera_failed = true;
+}
+std::string camera_status(void* raw, const std::string& language) {
+    const auto& c = *static_cast<Context*>(raw);
+    using wsm::i18n::Text;
+    const auto label = [&](Text key) { return std::string(wsm::i18n::text(key, language)); };
+    auto result = label(c.camera_mode == wsm::CameraFollowMode::OwnPlayer ? Text::CameraOwn : Text::CameraShared);
+    if (!c.camera_error.empty() || c.camera_failed) return result + " | " + label(Text::CameraUnavailable);
+    if (!c.camera_initialized) return result + " | " + label(Text::CameraInactive);
+    const auto state = c.camera->state();
+    if (!state.error.empty()) return result + " | " + label(Text::CameraUnavailable);
+    if (!state.attached || !state.has_target) return result + " | " + label(Text::CameraInactive);
+    return result + " | " + label(state.spectating ? Text::CameraSpectating : Text::CameraActive);
+}
+void tick_camera(Context& c, const wsm::MainThreadIdentity& identity) {
+    if (!c.camera_initialized) {
+        if (c.camera_failed) return;
+        auto candidate = std::make_unique<wsm::PlayerCameraController>();
+        if (!candidate->initialize(c.game, c.api, c.domain, identity.os_thread, identity.managed_thread, c.camera_error) ||
+            !c.camera_lifecycle.initialize(c.game, c.api, c.domain, identity.os_thread, identity.managed_thread, c.camera_error)) {
+            c.camera_failed = true;
+            c.log("WSM_CAMERA_UNAVAILABLE: " + c.camera_error);
+            return;
+        }
+        c.camera = std::move(candidate); c.camera_initialized = true;
+    }
+    const auto release = [&] {
+        if (!c.camera_open) return true;
+        if (!c.camera->close(c.camera_error)) return false;
+        c.camera_open = false; return true;
+    };
+    bool running = false;
+    std::string lifecycle_error;
+    const auto lifecycle = c.camera_lifecycle.read_run_state(running, lifecycle_error);
+    if (lifecycle == wsm::PlayerReadStatus::Captured && !running) {
+        if (release()) { c.camera_failed = false; c.camera_error.clear(); }
+        return;
+    }
+    if (c.camera_failed) { release(); return; }
+    if (lifecycle != wsm::PlayerReadStatus::Captured) {
+        release(); if (!lifecycle_error.empty()) c.camera_error = lifecycle_error;
+        return;
+    }
+    if (c.camera_open) {
+        const auto state = c.camera->state();
+        if (!state.error.empty()) {
+            // Do not burn a new callback generation every UI tick after a
+            // persistent engine failure. Retry explicitly or in the next run.
+            release(); c.camera_error = state.error; c.camera_failed = true;
+            return;
+        }
+        if (state.attached) return;
+        if (!release()) return;
+    }
+    // The current runtime creates its local primary actor as engine input 0.
+    // This is not a network-identity mapping or a second local viewport.
+    const auto opened = c.camera->open(0, c.camera_mode, c.camera_error);
+    c.camera_open = opened != wsm::PlayerReadStatus::NotReady;
+    if (opened == wsm::PlayerReadStatus::Error) {
+        const auto original = c.camera_error;
+        release(); c.camera_error = original; c.camera_failed = true;
+        c.log("WSM_CAMERA_UNAVAILABLE: " + c.camera_error);
+    }
+}
 void callback(void* raw) {
     auto& c = *static_cast<Context*>(raw);
     wsm::MainThreadIdentity identity;
     if (!c.guard.verify(c.window.thread, 0, identity, c.error)) return;
     try {
         if (c.stop) {
+            if (c.camera_initialized) c.camera_cleanup_pending = !c.camera->close(c.camera_error);
             if (c.menu) { c.menu->shutdown(); delete c.menu; c.menu = nullptr; }
             return;
         }
@@ -69,7 +146,8 @@ void callback(void* raw) {
             c.log("WSM_UNITY_THREAD_VERIFIED native=" + std::to_string(identity.os_thread) +
                   " managed=" + std::to_string(identity.managed_thread) + " engine_main=" + std::to_string(identity.engine_main_thread));
         }
-        c.menu->tick({&c, host, join, leave, status});
+        tick_camera(c, identity);
+        c.menu->tick({&c, host, join, leave, status, camera_mode, camera_status});
         const auto language = c.menu->language();
         if (language != c.previous_language) { c.previous_language = language; c.log("WSM_INGAME_LANGUAGE=" + language); }
     } catch (const std::exception& error) { c.error = error.what(); c.fatal = true; }
@@ -131,16 +209,17 @@ void run_ingame_menu(HMODULE bridge, HMODULE game, Il2CppApi api, Il2CppDomain* 
     c.runtime.leave();
     c.stop = true;
     bool cleanup_reported = false;
-    while (c.menu && IsWindow(c.window.hwnd)) {
+    while ((c.menu || c.camera_cleanup_pending) && IsWindow(c.window.hwnd)) {
         const auto cleanup = run_window_hook_recovering(bridge, c.window.hwnd, c.window.thread, callback, &c, 2000);
-        if (!c.menu || !IsWindow(c.window.hwnd)) break;
+        if ((!c.menu && !c.camera_cleanup_pending) || !IsWindow(c.window.hwnd)) break;
         if (!cleanup_reported) { log("WSM_INGAME_UI_CLEANUP_PENDING: retrying verified teardown before releasing its owner"); cleanup_reported = true; }
         // A context guard or managed teardown may fail transiently even after
         // dispatch resumes. Do not leave a persistent overlay without an owner.
-        if (cleanup != HookResult::completed || c.menu) Sleep(50);
+        if (cleanup != HookResult::completed || c.menu || c.camera_cleanup_pending) Sleep(50);
     }
     if (c.menu) log("WSM_INGAME_MENU_STOP: Unity ownership retained for process shutdown");
     else log("WSM_INGAME_MENU_STOP: native UI detached; network departure requested");
+    if (c.camera_cleanup_pending) log("WSM_CAMERA_STOP: callback ownership retained for process shutdown");
     if (c.fatal) log("ERROR: in-game menu stopped: " + c.error);
 }
 }

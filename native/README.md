@@ -20,6 +20,14 @@ The managed gameplay ABI carries validated session messages, including recipient
 
 Adapters must poll regularly. Core's separate 128-entry reward notification queue can stop the receiving session when full. The adapter reconciles receipts already accepted into Core's bounded ledger, but this does not guarantee continued connectivity or delivery of rewards Core has not accepted. The [gameplay ABI header](../src/Wsm.InGame.Runtime/native/wsm_ingame_abi.h) specifies the event kinds, request correlation and queue limits.
 
+## Experimental camera following
+
+The current source defaults to following the local primary actor, engine input 0. The localized in-game panel can request an own-player view or a shared view of living actors. Choosing a mode also retries a previously unavailable camera; enabled preference buttons do not mean the camera is attached. The status reports effective attachment and focus. This is not a network-client identity mapping or local split-screen implementation.
+
+Shared following excludes dead actors. After local death, own-player mode follows a stable living spectator target and returns to the local actor after revival. The adapter changes only the aggregate target's X/Y position through `GameManager.ManualCameraTargetControl`; it does not change depth, zoom or bounds. A sole survivor's focus is therefore not a guarantee of pixel-identical stock single-player framing.
+
+The [camera controller](include/wsm/player_camera_controller.h) validates current scene ownership even when an old scene stops invoking its callback. Cleanup retains ownership until confirmed and preserves foreign replacements. Callback addresses are not reused: the process supports at most 256 camera attachment generations, then refuses further attachment until restart. The [original Unity fixture](../tests/UnityPlayerStateFixture/Assets/CameraFixture.cs) exercises native callbacks, Transform effects and lifecycle failures. Own/shared focus and actual in-game mode controls have also been tested with game 2.1.6. A last-applied survivor target is not a fresh live survivor observation; exact death-transition framing and other game versions remain separate acceptance gates. Rebuild or update the complete portable package when using source changes.
+
 ## Scene probes
 
 The bridge needs `WSM_GAME_LOG` to point to the current game's Unity log and `WSM_BRIDGE_LOG` to a writable bridge log. It waits for the game's managed version startup line before touching IL2CPP. Metadata-only inspection remains the default. `inspection thread detached` is its completion receipt. Never use a stale game log as proof that this process has started scripting.

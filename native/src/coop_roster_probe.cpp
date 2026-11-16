@@ -6,12 +6,14 @@
 #include "wsm/upgrade_pass_hook.h"
 #include "wsm/upgrade_pass_profile.h"
 #include "wsm/upgrade_choice_controller.h"
+#include "wsm/player_camera_controller.h"
 #include <cmath>
 #include "wsm/window_hook.h"
 #include <charconv>
 #include <filesystem>
 #include <iomanip>
 #include <locale>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -20,7 +22,7 @@
 
 namespace wsm {
 namespace {
-enum class RosterAction { inspect, enroll, rollback, select_player, copy_character, upgrade_context, upgrade_selection, upgrade_items, upgrade_hint, equipment, input_profile, control_environment, control_open, control_pulse, control_close, upgrade_hook_inspect, upgrade_hook_install, upgrade_hook_remove, upgrade_offer, upgrade_choose, upgrade_choice_close };
+enum class RosterAction { inspect, enroll, rollback, select_player, copy_character, upgrade_context, upgrade_selection, upgrade_items, upgrade_hint, equipment, input_profile, control_environment, control_open, control_pulse, control_close, upgrade_hook_inspect, upgrade_hook_install, upgrade_hook_remove, upgrade_offer, upgrade_choose, upgrade_choice_close, camera_open, camera_mode, camera_state, camera_close };
 // Keep patch/recovery ownership past the bounded diagnostic worker lifetime.
 UpgradePassHook process_upgrade_hook;
 struct RosterCommand {
@@ -31,7 +33,15 @@ struct RosterCommand {
     std::uint32_t duration = 0;
     std::uint64_t choice_token = 0;
     std::int32_t choice_index = -1, choice_weapon = 0;
+    CameraFollowMode camera_mode = CameraFollowMode::OwnPlayer;
 };
+bool camera_opt_in() {
+    wchar_t value[8]{};
+    return GetEnvironmentVariableW(L"WSM_CAMERA_FOLLOW_OPT_IN",value,8)==1 && value[0]==L'1';
+}
+bool camera_action(RosterAction action) {
+    return action==RosterAction::camera_open || action==RosterAction::camera_mode || action==RosterAction::camera_state || action==RosterAction::camera_close;
+}
 bool control_opt_in() {
     wchar_t value[8]{};
     return GetEnvironmentVariableW(L"WSM_COOP_CONTROL_OPT_IN",value,8)==1 && value[0]==L'1';
@@ -61,11 +71,31 @@ bool parse_command(std::string_view text, DWORD expected_pid, RosterCommand& out
     for(const auto& route:std::initializer_list<std::pair<std::string_view,RosterAction>>{
         {"controlEnvironment:",RosterAction::control_environment},{"controlClose:",RosterAction::control_close},
         {"upgradeHook:",RosterAction::upgrade_hook_inspect},{"upgradeHookInstall:",RosterAction::upgrade_hook_install},
-        {"upgradeHookRemove:",RosterAction::upgrade_hook_remove},{"upgradeChoiceClose:",RosterAction::upgrade_choice_close}}) {
+        {"upgradeHookRemove:",RosterAction::upgrade_hook_remove},{"upgradeChoiceClose:",RosterAction::upgrade_choice_close},
+        {"cameraState:",RosterAction::camera_state},{"cameraClose:",RosterAction::camera_close}}) {
         if(text.substr(0,route.first.size())==route.first) {
             DWORD pid=0;if(!number(text.substr(route.first.size()),pid)||pid!=expected_pid)return false;
             result.action=route.second;output=result;return true;
         }
+    }
+    constexpr std::string_view camera_open_prefix="cameraOpen:", camera_mode_prefix="cameraMode:";
+    const bool camera_open=text.substr(0,camera_open_prefix.size())==camera_open_prefix;
+    const bool camera_mode=text.substr(0,camera_mode_prefix.size())==camera_mode_prefix;
+    if(camera_open || camera_mode) {
+        text.remove_prefix(camera_open?camera_open_prefix.size():camera_mode_prefix.size());
+        const auto first=text.find(':');
+        if(first==std::string_view::npos)return false;
+        DWORD pid=0;if(!number(text.substr(0,first),pid)||pid!=expected_pid)return false;
+        text.remove_prefix(first+1);
+        if(camera_open) {
+            const auto second=text.find(':');
+            if(second==std::string_view::npos||!number(text.substr(0,second),result.player)||result.player<0)return false;
+            text.remove_prefix(second+1);
+        }
+        if(text=="own")result.camera_mode=CameraFollowMode::OwnPlayer;
+        else if(text=="shared")result.camera_mode=CameraFollowMode::SharedAlive;
+        else return false;
+        result.action=camera_open?RosterAction::camera_open:RosterAction::camera_mode;output=result;return true;
     }
     constexpr std::string_view offer_prefix="upgradeOffer:",choose_prefix="upgradeChoose:";
     const bool offer=text.substr(0,offer_prefix.size())==offer_prefix;
@@ -243,6 +273,10 @@ struct ProbeContext {
     UpgradeChoiceOffer choice_offer;
     UpgradeChoiceResult choice_result;
     PlayerReadStatus choice_status = PlayerReadStatus::Error;
+    std::unique_ptr<PlayerCameraController> camera;
+    PlayerCameraState camera_state;
+    bool camera_state_captured=false;
+    PlayerReadStatus camera_open_status=PlayerReadStatus::Error;
 
     MainThreadIdentity identity;
     CoopRosterStatus status = CoopRosterStatus::Error;
@@ -263,6 +297,10 @@ bool ensure_control(ProbeContext& c) {
 void execute_command(void* raw) {
     auto& c = *static_cast<ProbeContext*>(raw);
     c.choice_offer={};c.choice_result={};c.choice_status=PlayerReadStatus::Error;
+    if(camera_action(c.command.action)) { c.camera_state_captured=false; c.camera_open_status=PlayerReadStatus::Error; }
+    if((c.command.action==RosterAction::camera_open||c.command.action==RosterAction::camera_mode)&&!camera_opt_in()) {
+        c.action_succeeded=false;c.error=c.action_error="Camera follow requires separate WSM_CAMERA_FOLLOW_OPT_IN=1";return;
+    }
     if(c.command.action==RosterAction::control_pulse) {
         // A deadline cannot clear an axis when the Unity thread is unresponsive.
         // Do not admit nonzero writes without a persistent cleanup/retry owner.
@@ -285,6 +323,26 @@ void execute_command(void* raw) {
     }
     try {
         if (!c.guard.verify(c.window.thread, 0, c.identity, c.action_error)) { c.error = c.action_error; return; }
+        if(camera_action(c.command.action)) {
+            if(c.command.action==RosterAction::camera_open) {
+                if(!c.camera) {
+                    auto controller=std::make_unique<PlayerCameraController>();
+                    if(controller->initialize(c.module,c.api,c.domain,c.window.thread,0,c.action_error))c.camera=std::move(controller);
+                }
+                if(c.camera) {
+                    c.camera_open_status=c.camera->open(c.command.player,c.command.camera_mode,c.action_error);
+                    c.action_succeeded=c.camera_open_status==PlayerReadStatus::Captured;
+                }
+            } else if(c.command.action==RosterAction::camera_mode) {
+                if(c.camera)c.action_succeeded=c.camera->set_mode(c.command.camera_mode,c.action_error);
+                else c.action_error="Camera controller is not open";
+            } else if(c.command.action==RosterAction::camera_close) {
+                c.action_succeeded=!c.camera||c.camera->close(c.action_error);
+            } else c.action_succeeded=true;
+            c.camera_state=c.camera?c.camera->state():PlayerCameraState{};
+            c.camera_state_captured=true;c.error=c.action_error;
+            return;
+        }
         c.player_status = c.player.read(c.scene, c.player_error);
         if(c.command.action==RosterAction::upgrade_choice_close) {
             c.action_succeeded=!c.choice||c.choice->close(c.action_error);
@@ -368,6 +426,10 @@ std::string result_json(const ProbeContext& c, unsigned sample) {
     if(c.command.action==RosterAction::upgrade_offer)action="upgradeOffer";
     if(c.command.action==RosterAction::upgrade_choose)action="upgradeChoose";
     if(c.command.action==RosterAction::upgrade_choice_close)action="upgradeChoiceClose";
+    if(c.command.action==RosterAction::camera_open)action="cameraOpen";
+    if(c.command.action==RosterAction::camera_mode)action="cameraMode";
+    if(c.command.action==RosterAction::camera_state)action="cameraState";
+    if(c.command.action==RosterAction::camera_close)action="cameraClose";
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << "{\"schemaVersion\":1,\"sample\":" << sample << ",\"action\":\"" << action
@@ -539,6 +601,23 @@ std::string result_json(const ProbeContext& c, unsigned sample) {
         }
         out<<'}';
     }
+    if(camera_action(c.command.action)) {
+        out<<",\"camera\":{\"stateCaptured\":"<<(c.camera_state_captured?"true":"false");
+        out<<std::setprecision(std::numeric_limits<float>::max_digits10);
+        if(c.command.action==RosterAction::camera_open)
+            out<<",\"openStatus\":"<<quoted_json(c.camera_open_status==PlayerReadStatus::Captured?"captured":c.camera_open_status==PlayerReadStatus::NotReady?"not_ready":"error");
+        if(c.camera_state_captured) {
+            const auto& s=c.camera_state;
+            out<<",\"attached\":"<<(s.attached?"true":"false")<<",\"hasTarget\":"<<(s.has_target?"true":"false")
+               <<",\"spectating\":"<<(s.spectating?"true":"false")<<",\"localInputId\":"<<s.local_input_id
+               <<",\"targetInputId\":"<<s.target_input_id<<",\"mode\":"<<quoted_json(s.mode==CameraFollowMode::OwnPlayer?"own":"shared")
+               <<",\"updates\":"<<quoted_json(std::to_string(s.updates))<<",\"x\":";
+            if(std::isfinite(s.x))out<<s.x;else out<<"null";
+            out<<",\"y\":";if(std::isfinite(s.y))out<<s.y;else out<<"null";
+            out<<",\"error\":"<<quoted_json(s.error);
+        }
+        out<<'}';
+    }
     out << ",\"playerObservation\":" << player_observation_json(c.player_status, c.scene, c.identity, sample)
         << ",\"errors\":{\"action\":" << quoted_json(c.action_error)
         << ",\"roster\":" << quoted_json(c.roster_error)
@@ -589,6 +668,7 @@ void run_coop_roster_probe(HMODULE bridge, HMODULE game, Il2CppApi api,
             c.control_environment={};c.control_status=PlayerReadStatus::Error;c.pulse={};c.control_error.clear();
             c.startup_patch_checked=false;c.startup_patch_verified=false;c.startup_patch_error.clear();
             c.choice_offer={};c.choice_result={};c.choice_status=PlayerReadStatus::Error;
+            c.camera_state_captured=false;c.camera_open_status=PlayerReadStatus::Error;
 
             const auto status = run_window_hook(bridge, c.window.hwnd, c.window.thread, execute_command, &c, 2000);
             if (status != HookResult::completed) { c.action_succeeded = false; c.status = CoopRosterStatus::Error; c.player_status = PlayerReadStatus::Error; c.upgrade_status=PlayerReadStatus::Error; c.equipment_status=PlayerReadStatus::Error; c.input_profile_status=PlayerReadStatus::Error; c.error = c.action_error = "Owned Unity roster callback did not complete"; }
@@ -601,6 +681,11 @@ void run_coop_roster_probe(HMODULE bridge, HMODULE game, Il2CppApi api,
         if(process_upgrade_hook.state().ownership_retained)
             log("WSM_UPGRADE_HOOK_PROCESS_LIFETIME: retained until explicit outside-run removal or process exit");
     } catch (const std::exception& e) { log(std::string("ERROR: roster probe stopped: ") + e.what()); }
+    if(context&&context->camera&&IsWindow(context->window.hwnd)) {
+        context->command.action=RosterAction::camera_close;context->action_succeeded=false;context->action_error.clear();
+        const auto done=run_window_hook(bridge,context->window.hwnd,context->window.thread,execute_command,context.get(),2000);
+        log(done==HookResult::completed&&context->action_succeeded?"WSM_CAMERA_CLEANUP: owned callback removed":"ERROR: camera cleanup unverified; exposed context retained until process exit");
+    }
     if(context&&context->control&&context->control->state().cleanup_required&&IsWindow(context->window.hwnd)) {
         auto cleanup=[](void* raw){auto& c=*static_cast<ProbeContext*>(raw);c.action_succeeded=c.control->close(c.control_error);};
         const auto done=run_window_hook(bridge,context->window.hwnd,context->window.thread,cleanup,context.get(),2000);

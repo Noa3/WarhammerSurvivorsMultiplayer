@@ -56,6 +56,13 @@ EXPECTED_CASES.update({"choice_secondary_owner_once", "choice_replay_never_calls
     "choice_wrong_os_thread_refused", "choice_callback_exception_consumes_offer", "choice_closed_offer_refused",
     "choice_close_after_stopped_run", "choice_limitless_card_refused",
     "choice_zero_weapon_library_refused", "choice_negative_weapon_library_refused"})
+EXPECTED_CASES.update({"camera_open_own", "camera_own_effect", "camera_own_updates", "camera_shared_centroid",
+    "camera_shared_dead_first", "camera_shared_dead_second", "camera_all_dead", "camera_revival_own",
+    "camera_spectate_living", "camera_spectate_stable", "camera_close_owned", "camera_foreign_open_refused",
+    "camera_foreign_replacement_preserved", "camera_stage_replacement", "camera_target_replacement",
+    "camera_wrong_thread", "camera_not_normal_refused", "camera_null_target_refused"})
+EXPECTED_CASES.update({"camera_late_delegate_isolated", "camera_destroyed_manager_recovers", "camera_non_normal_restores_stock", "camera_replaced_manager_inactive"})
+EXPECTED_CASES.update({"camera_foreign_callback_generation_reset"})
 root=os.path.abspath(os.path.join(os.path.dirname(__file__),"..",".."))
 local=os.path.join(root,".local")
 player=os.environ.get("WSM_PLAYER_STATE_PLAYER","player-state-v1-player4")

@@ -47,9 +47,12 @@ struct InGameMenu::Impl {
     Il2CppObject *address = nullptr, *port = nullptr, *status_text = nullptr;
     Il2CppObject *address_rect = nullptr, *port_rect = nullptr;
     Il2CppObject *host_rect = nullptr, *join_rect = nullptr, *leave_rect = nullptr, *tab_rect = nullptr;
+    Il2CppObject *camera_own_rect = nullptr, *camera_shared_rect = nullptr, *camera_status_text = nullptr;
+    bool camera_buttons_visible = false;
+    bool camera_status_initialized = false;
     bool visible = true, foreground = false, mouse_down = false, f6_down = false;
     Text status_override = Text::Count;
-    std::string last_status, language = "en";
+    std::string last_status, last_camera_status, language = "en";
     std::vector<std::pair<Il2CppObject*, Text>> localized_labels;
     std::vector<Il2CppObject*> text_components;
     std::unordered_map<std::string, Il2CppObject*> owned_fonts;
@@ -273,6 +276,8 @@ struct InGameMenu::Impl {
         language = current; font = next_font;
         if (status_override == Text::UiError) status_override = Text::Count;
         last_status.clear();
+        last_camera_status.clear();
+        camera_status_initialized = false;
     }
     Il2CppObject* input(Il2CppObject* parent, const char* name, const char* initial, Vec2 size, Vec2 pos, EditorField& editor) {
         auto go = make_go(name, parent, size, pos);
@@ -292,11 +297,11 @@ struct InGameMenu::Impl {
         bool hidden = false; set_value("active", editor.selection, &hidden); set_value("active", editor.caret, &hidden);
         return field;
     }
-    Il2CppObject* button(Il2CppObject* parent, const char* name, Text caption, Vec2 size, Vec2 pos) {
+    Il2CppObject* button(Il2CppObject* parent, const char* name, Text caption, Vec2 size, Vec2 pos, int font_size = 20) {
         auto go = make_go(name, parent, size, pos);
         auto bg = image(go, {0.22f, 0.32f, 0.42f, 1.0f});
         auto b = add_component(go, "Button"); set_ref("target_graphic", b, bg);
-        label(go, "WSM Button Text", caption, size, {0, 0}, 20);
+        label(go, "WSM Button Text", caption, size, {0, 0}, font_size);
         return rectangle(go);
     }
     void resolve(HMODULE game, Il2CppDomain* domain) {
@@ -496,7 +501,7 @@ struct InGameMenu::Impl {
         tab = make_go("WSM Koop", root, {120, 40}, {80, -35}, {0, 1});
         auto tab_bg = image(tab, {0.18f, 0.27f, 0.36f, 1}); auto tab_button = add_component(tab, "Button");
         set_ref("target_graphic", tab_button, tab_bg); label(tab, "WSM Tab Text", Text::Tab, {120, 40}, {0, 0}, 16); tab_rect = rectangle(tab);
-        panel = make_go("WSM Coop Panel", root, {600, 360}, {0, 0});
+        panel = make_go("WSM Coop Panel", root, {600, 500}, {0, 0});
         image(panel, {0.05f, 0.07f, 0.10f, 0.97f});
         label(panel, "WSM Title", Text::Title, {550, 40}, {0, 145}, 25);
         label(panel, "WSM Address Label", Text::Address, {340, 30}, {-85, 99}, 18);
@@ -510,6 +515,12 @@ struct InGameMenu::Impl {
         join_rect = button(panel, "WSM Beitreten", Text::Join, {170, 46}, {0, -30});
         leave_rect = button(panel, "WSM Verlassen", Text::Leave, {170, 46}, {190, -30});
         status_text = label(panel, "WSM Status", Text::Ready, {550, 65}, {0, -120}, 17);
+        camera_own_rect = button(panel, "WSM Camera Own", Text::CameraOwn, {260, 36}, {-140, -183}, 16);
+        camera_shared_rect = button(panel, "WSM Camera Shared", Text::CameraShared, {260, 36}, {140, -183}, 16);
+        bool hidden = false;
+        set_value("active", call("component_object", camera_own_rect), &hidden);
+        set_value("active", call("component_object", camera_shared_rect), &hidden);
+        camera_status_text = text(panel, "WSM Camera Status", std::string(i18n::text(Text::CameraUnavailable, language)), {550, 36}, {0, -226}, 16);
         endpoint_measure = text(panel, "WSM Endpoint Measure", "", {0, 0}, {0, -10000}, 19);
         Color transparent{1, 1, 1, 0}; set_value("color", endpoint_measure, &transparent);
         ensure_event_system();
@@ -530,6 +541,10 @@ struct InGameMenu::Impl {
     bool click(Vec2 p, const InGameMenuActions& a) {
         if (hit(tab_rect, p) && topmost(tab_rect, p)) { set_visible(!visible); return true; }
         if (!visible) return false;
+        if (a.camera_mode && camera_buttons_visible) {
+            if (hit(camera_own_rect, p) && topmost(camera_own_rect, p)) { a.camera_mode(a.context, false); return true; }
+            if (hit(camera_shared_rect, p) && topmost(camera_shared_rect, p)) { a.camera_mode(a.context, true); return true; }
+        }
         bool h = hit(host_rect, p) && topmost(host_rect, p), j = hit(join_rect, p) && topmost(join_rect, p), l = hit(leave_rect, p) && topmost(leave_rect, p);
         if (!h && !j && !l) return false;
         status_override = Text::Count;
@@ -661,6 +676,18 @@ struct InGameMenu::Impl {
         if (scale != last_scale) { editing = nullptr; set_value("scale_factor", canvas, &scale); last_scale = scale; }
         std::string current = status_override == Text::Count ? (a.status ? a.status(a.context, language) : std::string(i18n::text(Text::NotConnected, language))) : std::string(i18n::text(status_override, language));
         if (current != last_status) { set_string("text", status_text, current); last_status = current; }
+        const bool camera_available = a.camera_mode != nullptr;
+        if (camera_available != camera_buttons_visible) {
+            bool enabled = camera_available;
+            set_value("active", call("component_object", camera_own_rect), &enabled);
+            set_value("active", call("component_object", camera_shared_rect), &enabled);
+            camera_buttons_visible = enabled;
+        }
+        const auto camera_status = a.camera_status ? a.camera_status(a.context, language) : std::string(i18n::text(Text::CameraUnavailable, language));
+        if (!camera_status_initialized || camera_status != last_camera_status) {
+            set_string("text", camera_status_text, camera_status);
+            last_camera_status = camera_status; camera_status_initialized = true;
+        }
         bool focused = GetForegroundWindow() == owner;
         if (!focused) { pending_count = 0; pressed_rect = nullptr; editing = nullptr; draw_endpoint_editor(); dispatch_input(false, false, false, false, {}, a); return; }
         const auto clicks = pending_clicks;
@@ -688,7 +715,9 @@ struct InGameMenu::Impl {
                     if (field) { begin_edit(*field); pressed_rect = nullptr; continue; }
                     editing = nullptr;
                     pressed_rect = hit(tab_rect, point) && topmost(tab_rect, point) ? tab_rect : visible && hit(host_rect, point) && topmost(host_rect, point) ? host_rect :
-                        visible && hit(join_rect, point) && topmost(join_rect, point) ? join_rect : visible && hit(leave_rect, point) && topmost(leave_rect, point) ? leave_rect : nullptr;
+                        visible && hit(join_rect, point) && topmost(join_rect, point) ? join_rect : visible && hit(leave_rect, point) && topmost(leave_rect, point) ? leave_rect :
+                        visible && camera_buttons_visible && a.camera_mode && hit(camera_own_rect, point) && topmost(camera_own_rect, point) ? camera_own_rect :
+                        visible && camera_buttons_visible && a.camera_mode && hit(camera_shared_rect, point) && topmost(camera_shared_rect, point) ? camera_shared_rect : nullptr;
                 } else {
                     auto pressed = pressed_rect; pressed_rect = nullptr;
                     if (pressed && (pressed == tab_rect || visible) && hit(pressed, point)) click(point, a);
