@@ -18,8 +18,9 @@ import time
 STATE_DISCONNECTED, STATE_HOSTING, STATE_CONNECTING, STATE_CONNECTED, STATE_FAILED = range(5)
 ACCEPTED, INVALID_ARGUMENT, UNAVAILABLE, QUEUE_FULL, INSUFFICIENT_CAPACITY = 0, -1, -2, -3, -5
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-DEFAULT_DLL = os.path.join(ROOT, ".local", "ingame-runtime-v1-native", "Wsm.InGame.Runtime.dll")
-DEFAULT_PROBE = os.path.join(ROOT, ".local", "ingame-runtime-v1-build", "probe", "Release", "wsm_ingame_probe.exe")
+# Use the canonical build outputs, not a pre-existing private developer cache.
+DEFAULT_DLL = os.path.join(ROOT, "artifacts", "ingame-runtime", "Wsm.InGame.Runtime.dll")
+DEFAULT_PROBE = os.path.join(ROOT, "artifacts", "native-build", "Release", "ingame_aot_abi.exe")
 REFUSED = 10061
 
 

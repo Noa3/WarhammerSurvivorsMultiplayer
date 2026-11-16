@@ -5,4 +5,5 @@
   <assembly fullname="Unity.Mathematics" preserve="all" />
   <assembly fullname="UnityEngine.CoreModule"><type fullname="UnityEngine.UnitySynchronizationContext" preserve="all" /><type fullname="UnityEngine.Object" preserve="all" /><type fullname="UnityEngine.GameObject" preserve="all" /><type fullname="UnityEngine.Component" preserve="all" /><type fullname="UnityEngine.Transform" preserve="all" /></assembly>
   <assembly fullname="mscorlib"><type fullname="System.Array" preserve="all" /><type fullname="System.Threading.Thread" preserve="all" /><type fullname="System.Threading.SynchronizationContext" preserve="all" /></assembly>
+  <assembly fullname="UnityEngine.UI"><type fullname="UnityEngine.UI.Selectable" preserve="all" /></assembly>
 </linker>

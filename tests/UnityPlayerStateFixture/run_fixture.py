@@ -2,6 +2,7 @@
 import os, re, subprocess, sys
 from collections import Counter
 EXPECTED_CASES = {"no_manager", "null_stage", "empty_players", "two_players", "populated_stopped",
+                  "run_gate_no_manager", "run_gate_running_without_stage", "run_gate_wrong_thread", "run_gate_positively_stopped",
                   "wrong_native_thread", "wrong_managed_thread", "null_context", "substituted_context",
                   "worker_thread", "over_cap", "non_finite", "late_non_finite", "null_input", "recovered",
                   "stage_root_failure", "players_root_failure",
@@ -33,7 +34,28 @@ EXPECTED_CASES = {"no_manager", "null_stage", "empty_players", "two_players", "p
                   "input_profile_missing_definition", "input_profile_late_axis_error", "input_profile_null_axes",
                   "input_profile_duplicate_axis", "input_profile_negative_axis", "input_profile_one_axis",
                   "input_profile_axes_at_bound", "input_profile_axes_over_bound", "input_profile_definitions_at_bound",
-                  "input_profile_definitions_over_bound", "input_profile_missing_action", "input_profile_duplicate_managers"}
+                  "input_profile_definitions_over_bound", "input_profile_missing_action", "input_profile_duplicate_managers",
+                  "control_controller_id_readonly_field_contract", "control_environment", "control_refuse_primary", "control_refuse_source", "control_refuse_category",
+                  "control_refuse_layout", "control_refuse_duplicate_axes", "control_open_neutral", "control_refuse_duplicate_open",
+                  "control_refuse_nan", "control_mapped_remote_axes", "control_neutral", "control_cleanup",
+                  "control_owned_resources_absent", "control_primary_resources_preserved", "control_wrong_os_thread_atomic",
+                  "control_missing_map_rollback", "control_binding_failure_rollback", "control_populated_map_rollback",
+                  "control_enable_failure_rollback", "control_registered_map_failure_rollback", "control_partial_failures_absent", "control_reopen_after_failures",
+                  "control_reject_replaced_input_identity", "control_reject_stopped_run", "control_reject_failed_axis_write",
+                  "control_resume_after_refused_writes", "control_cleanup_zero_setter_failure", "control_cleanup_fallback_neutral",
+                  "control_open_before_replaced_player_cleanup", "control_close_replaced_player", "control_replaced_player_resources_removed",
+                  "control_open_before_foreign_map", "control_refuse_foreign_map_collision", "control_foreign_map_collision_preserved",
+                  "control_close_after_foreign_map_removed"}
+EXPECTED_CASES.update({"choice_secondary_owner_once", "choice_replay_never_calls_again",
+    "choice_wrong_owner_capture_atomic", "choice_wrong_owner_submit", "choice_wrong_weapon_submit",
+    "choice_decorative_child_refused", "choice_out_of_range_refused", "choice_zero_token_refused",
+    "choice_recapture_invalidates_old_token", "choice_changed_data_refused", "choice_changed_card_level_refused",
+    "choice_changed_active_owner_refused", "choice_replaced_actor_same_id_refused", "choice_replaced_stage_refused",
+    "choice_stopped_run_refused", "choice_dead_actor_refused", "choice_disabled_card_refused",
+    "choice_animating_page_refused", "choice_destroyed_card_refused", "choice_wrong_page_association_refused",
+    "choice_wrong_os_thread_refused", "choice_callback_exception_consumes_offer", "choice_closed_offer_refused",
+    "choice_close_after_stopped_run", "choice_limitless_card_refused",
+    "choice_zero_weapon_library_refused", "choice_negative_weapon_library_refused"})
 root=os.path.abspath(os.path.join(os.path.dirname(__file__),"..",".."))
 local=os.path.join(root,".local")
 player=os.environ.get("WSM_PLAYER_STATE_PLAYER","player-state-v1-player4")

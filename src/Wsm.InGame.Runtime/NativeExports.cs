@@ -46,6 +46,45 @@ public static class NativeExports
     [UnmanagedCallersOnly(EntryPoint = "wsm_ingame_version", CallConvs = [typeof(CallConvCdecl)])]
     public static int Version() => 1;
 
+    /// <summary>Optional gameplay mailbox contract; the original connection ABI stays at 1.</summary>
+    [UnmanagedCallersOnly(EntryPoint = "wsm_ingame_gameplay_version", CallConvs = [typeof(CallConvCdecl)])]
+    public static int GameplayVersion() => 1;
+
+    [UnmanagedCallersOnly(EntryPoint = "wsm_ingame_gameplay_epoch", CallConvs = [typeof(CallConvCdecl)])]
+    public static int GameplayEpoch()
+    { try { return Volatile.Read(ref stopped) == 0 ? Controller.GameplayEpoch : 0; } catch { return 0; } }
+
+    [UnmanagedCallersOnly(EntryPoint = "wsm_ingame_gameplay_info", CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe int GameplayInfo(byte* buffer, int capacity)
+    { try { return WriteUtf8(Controller.GameplayInfoPayload(), buffer, capacity); } catch { return Unavailable; } }
+
+    /// <summary>Queues validated UTF-8 JSON for this epoch; never waits for network I/O.</summary>
+    [UnmanagedCallersOnly(EntryPoint = "wsm_ingame_gameplay_submit", CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe int GameplaySubmit(int expectedEpoch, byte* json, int length)
+    {
+        try
+        {
+            if (Volatile.Read(ref stopped) != 0) return Unavailable;
+            if (expectedEpoch <= 0 || json is null || length is < 1 or > GameplayMailbox.MaxRequestBytes) return InvalidArgument;
+            return Controller.SubmitGameplay(expectedEpoch, new ReadOnlySpan<byte>(json, length));
+        }
+        catch { return Unavailable; }
+    }
+
+    /// <summary>Queries or copies+consumes one event. Empty=0; -5 leaves it queued.</summary>
+    [UnmanagedCallersOnly(EntryPoint = "wsm_ingame_gameplay_poll", CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe int GameplayPoll(byte* buffer, int capacity)
+    {
+        try
+        {
+            if (Volatile.Read(ref stopped) != 0) return Unavailable;
+            if (capacity < 0 || capacity > GameplayMailbox.MaxEventBytes + 1 || (buffer is null && capacity != 0) ||
+                (buffer is not null && capacity == 0)) return InvalidArgument;
+            return Controller.PollGameplay(buffer is null ? Span<byte>.Empty : new Span<byte>(buffer, capacity));
+        }
+        catch { return Unavailable; }
+    }
+
     /// <summary>Starts hosting in the current process. port 0 binds an ephemeral port.</summary>
     [UnmanagedCallersOnly(EntryPoint = "wsm_ingame_host", CallConvs = [typeof(CallConvCdecl)])]
     public static int Host(int port, int lanBind)

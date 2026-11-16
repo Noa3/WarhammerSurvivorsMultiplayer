@@ -2,6 +2,11 @@
 #include "wsm/coop_roster.h"
 #include "wsm/player_observer.h"
 #include "wsm/rewired_input_profile.h"
+#include "wsm/rewired_control_pulse.h"
+#include "wsm/upgrade_pass_hook.h"
+#include "wsm/upgrade_pass_profile.h"
+#include "wsm/upgrade_choice_controller.h"
+#include <cmath>
 #include "wsm/window_hook.h"
 #include <charconv>
 #include <filesystem>
@@ -15,8 +20,30 @@
 
 namespace wsm {
 namespace {
-enum class RosterAction { inspect, enroll, rollback, select_player, copy_character, upgrade_context, upgrade_selection, upgrade_items, upgrade_hint, equipment, input_profile };
-struct RosterCommand { RosterAction action = RosterAction::inspect; std::int32_t player = -1; };
+enum class RosterAction { inspect, enroll, rollback, select_player, copy_character, upgrade_context, upgrade_selection, upgrade_items, upgrade_hint, equipment, input_profile, control_environment, control_open, control_pulse, control_close, upgrade_hook_inspect, upgrade_hook_install, upgrade_hook_remove, upgrade_offer, upgrade_choose, upgrade_choice_close };
+// Keep patch/recovery ownership past the bounded diagnostic worker lifetime.
+UpgradePassHook process_upgrade_hook;
+struct RosterCommand {
+    RosterAction action = RosterAction::inspect;
+    std::int32_t player = -1;
+    RewiredControlOptions control;
+    float x = 0, y = 0;
+    std::uint32_t duration = 0;
+    std::uint64_t choice_token = 0;
+    std::int32_t choice_index = -1, choice_weapon = 0;
+};
+bool control_opt_in() {
+    wchar_t value[8]{};
+    return GetEnvironmentVariableW(L"WSM_COOP_CONTROL_OPT_IN",value,8)==1 && value[0]==L'1';
+}
+bool upgrade_hook_opt_in() {
+    wchar_t value[8]{};
+    return GetEnvironmentVariableW(L"WSM_UPGRADE_PASS_HOOK_OPT_IN",value,8)==1 && value[0]==L'1';
+}
+bool upgrade_choice_opt_in() {
+    wchar_t value[8]{};
+    return GetEnvironmentVariableW(L"WSM_UPGRADE_CHOICE_OPT_IN",value,8)==1 && value[0]==L'1';
+}
 bool mutates_roster(RosterAction action) {
     return action==RosterAction::enroll || action==RosterAction::rollback ||
            action==RosterAction::select_player || action==RosterAction::copy_character;
@@ -31,6 +58,54 @@ bool parse_command(std::string_view text, DWORD expected_pid, RosterCommand& out
     while (!text.empty() && (text.back() == '\r' || text.back() == '\n')) text.remove_suffix(1);
     RosterCommand result;
     if (text == "inspect") { output = result; return true; }
+    for(const auto& route:std::initializer_list<std::pair<std::string_view,RosterAction>>{
+        {"controlEnvironment:",RosterAction::control_environment},{"controlClose:",RosterAction::control_close},
+        {"upgradeHook:",RosterAction::upgrade_hook_inspect},{"upgradeHookInstall:",RosterAction::upgrade_hook_install},
+        {"upgradeHookRemove:",RosterAction::upgrade_hook_remove},{"upgradeChoiceClose:",RosterAction::upgrade_choice_close}}) {
+        if(text.substr(0,route.first.size())==route.first) {
+            DWORD pid=0;if(!number(text.substr(route.first.size()),pid)||pid!=expected_pid)return false;
+            result.action=route.second;output=result;return true;
+        }
+    }
+    constexpr std::string_view offer_prefix="upgradeOffer:",choose_prefix="upgradeChoose:";
+    const bool offer=text.substr(0,offer_prefix.size())==offer_prefix;
+    const bool choose=text.substr(0,choose_prefix.size())==choose_prefix;
+    if(offer||choose) {
+        text.remove_prefix(offer?offer_prefix.size():choose_prefix.size());std::vector<std::string_view> parts;
+        while(true){const auto p=text.find(':');parts.push_back(text.substr(0,p));if(p==std::string_view::npos)break;text.remove_prefix(p+1);if(parts.size()>5)return false;}
+        DWORD pid=0;
+        if(parts.size()!=(offer?2u:5u)||!number(parts[0],pid)||pid!=expected_pid)return false;
+        if(offer) {
+            if(!number(parts[1],result.player)||result.player<0)return false;
+            result.action=RosterAction::upgrade_offer;
+        } else {
+            if(!number(parts[1],result.choice_token)||!result.choice_token||!number(parts[2],result.player)||result.player<0||
+               !number(parts[3],result.choice_index)||result.choice_index<0||result.choice_index>=32||
+               !number(parts[4],result.choice_weapon)||result.choice_weapon<=0)return false;
+            result.action=RosterAction::upgrade_choose;
+        }
+        output=result;return true;
+    }
+    const bool control_open=text.substr(0,12)=="controlOpen:";
+    const bool control_pulse=text.substr(0,13)=="controlPulse:";
+    if(control_open||control_pulse) {
+        text.remove_prefix(control_open?12:13);std::vector<std::string_view> parts;
+        while(true){auto p=text.find(':');parts.push_back(text.substr(0,p));if(p==std::string_view::npos)break;text.remove_prefix(p+1);if(parts.size()>6)return false;}
+        DWORD pid=0;if(parts.size()!=(control_open?6u:4u)||!number(parts[0],pid)||pid!=expected_pid)return false;
+        if(control_open) {
+            result.control.player_id=1;
+            std::int32_t* fields[]={&result.control.source_id,&result.control.category_id,&result.control.layout_id,&result.control.horizontal_axis_id,&result.control.vertical_axis_id};
+            for(unsigned i=0;i<5;++i)if(!number(parts[i+1],*fields[i])||*fields[i]<0)return false;
+            if(result.control.horizontal_axis_id==result.control.vertical_axis_id)return false;
+            result.action=RosterAction::control_open;
+        } else {
+            if(!number(parts[1],result.x)||!number(parts[2],result.y)||!number(parts[3],result.duration)||
+                !std::isfinite(result.x)||!std::isfinite(result.y)||std::abs(result.x)>1||std::abs(result.y)>1||
+                (result.x==0&&result.y==0)||result.duration<1||result.duration>250)return false;
+            result.action=RosterAction::control_pulse;
+        }
+        output=result;return true;
+    }
     constexpr std::string_view profile_prefix="inputProfile:";
     if(text.substr(0,profile_prefix.size())==profile_prefix) {
         DWORD pid=0;if(!number(text.substr(profile_prefix.size()),pid)||pid!=expected_pid)return false;
@@ -157,6 +232,18 @@ struct ProbeContext {
     UpgradeContextSnapshot upgrade;
     EquipmentSnapshot equipment;
     RewiredInputProfileSnapshot input_profile;
+    std::unique_ptr<RewiredControllerSession> control;
+    RewiredControlEnvironment control_environment;
+    RewiredPulseResult pulse;
+    PlayerReadStatus control_status = PlayerReadStatus::Error;
+    std::string control_error;
+    bool startup_patch_checked=false,startup_patch_verified=false;
+    std::string startup_patch_error;
+    std::unique_ptr<UpgradeChoiceController> choice;
+    UpgradeChoiceOffer choice_offer;
+    UpgradeChoiceResult choice_result;
+    PlayerReadStatus choice_status = PlayerReadStatus::Error;
+
     MainThreadIdentity identity;
     CoopRosterStatus status = CoopRosterStatus::Error;
     PlayerReadStatus player_status = PlayerReadStatus::Error;
@@ -167,12 +254,65 @@ struct ProbeContext {
     std::string error;
     std::string action_error, roster_error, configuration_error, player_error, upgrade_error;
 };
+bool ensure_control(ProbeContext& c) {
+    if(c.control)return true;
+    auto session=std::make_unique<RewiredControllerSession>();
+    if(!session->initialize(c.module,c.api,c.domain,c.window.thread,0,c.action_error))return false;
+    c.control=std::move(session);return true;
+}
 void execute_command(void* raw) {
     auto& c = *static_cast<ProbeContext*>(raw);
+    c.choice_offer={};c.choice_result={};c.choice_status=PlayerReadStatus::Error;
+    if(c.command.action==RosterAction::control_pulse) {
+        // A deadline cannot clear an axis when the Unity thread is unresponsive.
+        // Do not admit nonzero writes without a persistent cleanup/retry owner.
+        c.action_succeeded=false;
+        c.error=c.action_error="Input pulse disabled: persistent cleanup and retry owner unavailable";
+        return;
+    }
+    if((c.command.action==RosterAction::upgrade_offer||c.command.action==RosterAction::upgrade_choose)&&!upgrade_choice_opt_in()) {
+        c.action_succeeded=false;c.error=c.action_error="Upgrade selection requires separate WSM_UPGRADE_CHOICE_OPT_IN=1";return;
+    }
+    if(c.command.action==RosterAction::upgrade_hook_install || c.command.action==RosterAction::upgrade_hook_remove) {
+        // Thread identity and a stopped run do not establish code quiescence.
+        // Keep both writes unreachable until a verified safe window exists.
+        c.action_succeeded=false;
+        c.action_error=upgrade_hook_opt_in()?
+            "Upgrade hook mutation disabled: no verified quiescent patch window":
+            "Upgrade hook mutation requires separate WSM_UPGRADE_PASS_HOOK_OPT_IN=1";
+        c.error=c.action_error;
+        return;
+    }
     try {
         if (!c.guard.verify(c.window.thread, 0, c.identity, c.action_error)) { c.error = c.action_error; return; }
         c.player_status = c.player.read(c.scene, c.player_error);
-        if(c.command.action==RosterAction::upgrade_context || c.command.action==RosterAction::upgrade_selection || c.command.action==RosterAction::upgrade_items || c.command.action==RosterAction::upgrade_hint) {
+        if(c.command.action==RosterAction::upgrade_choice_close) {
+            c.action_succeeded=!c.choice||c.choice->close(c.action_error);
+            if(c.action_succeeded)c.choice.reset();
+        } else if(c.command.action==RosterAction::upgrade_offer||c.command.action==RosterAction::upgrade_choose) {
+            if(c.player_status!=PlayerReadStatus::Captured)c.action_error="A captured active scene is required for upgrade selection";
+            else {
+                if(!c.choice) {
+                    auto controller=std::make_unique<UpgradeChoiceController>();
+                    if(controller->initialize(c.module,c.api,c.domain,c.window.thread,0,c.action_error))c.choice=std::move(controller);
+                }
+                if(c.choice&&c.command.action==RosterAction::upgrade_offer) {
+                    c.choice_status=c.choice->capture(c.command.player,c.choice_offer,c.action_error);
+                    c.action_succeeded=c.choice_status==PlayerReadStatus::Captured;
+                } else if(c.choice)c.action_succeeded=c.choice->select(c.command.choice_token,c.command.player,c.command.choice_index,c.command.choice_weapon,c.choice_result,c.action_error);
+            }
+        } else if(c.command.action==RosterAction::upgrade_hook_inspect) {
+            c.startup_patch_checked=true;
+            c.startup_patch_verified=verify_upgrade_pass_image(c.module,true,c.startup_patch_error);
+            c.action_succeeded=true;
+        } else if(c.command.action==RosterAction::control_environment) {
+            if(ensure_control(c)) {c.control_status=c.control->inspect(c.control_environment,c.action_error);c.action_succeeded=c.control_status==PlayerReadStatus::Captured;}
+        } else if(c.command.action==RosterAction::control_open) {
+            if(!control_opt_in())c.action_error="Controller mutation requires explicit WSM_COOP_CONTROL_OPT_IN=1";
+            else if(ensure_control(c))c.action_succeeded=c.control->open(c.command.control,c.action_error);
+        } else if(c.command.action==RosterAction::control_close) {
+            c.action_succeeded=!c.control||c.control->close(c.action_error);
+        } else if(c.command.action==RosterAction::upgrade_context || c.command.action==RosterAction::upgrade_selection || c.command.action==RosterAction::upgrade_items || c.command.action==RosterAction::upgrade_hint) {
             c.upgrade_status=c.command.action==RosterAction::upgrade_hint?c.player.read_upgrade_hint(c.upgrade,c.upgrade_error):c.command.action==RosterAction::upgrade_items?c.player.read_upgrade_items(c.upgrade,c.upgrade_error):c.command.action==RosterAction::upgrade_selection?
                 c.player.read_upgrade_selection(c.upgrade,c.upgrade_error):c.player.read_upgrade_context(c.upgrade,c.upgrade_error);
             c.action_succeeded=c.upgrade_status==PlayerReadStatus::Captured;
@@ -218,6 +358,16 @@ std::string quoted_json(std::string_view value) {
 std::string result_json(const ProbeContext& c, unsigned sample) {
     const char* state = c.status == CoopRosterStatus::Captured ? "captured" : c.status == CoopRosterStatus::NotReady ? "not_ready" : "error";
     const char* action = c.command.action == RosterAction::inspect ? "inspect" : c.command.action == RosterAction::enroll ? "enroll" : c.command.action == RosterAction::select_player ? "select" : c.command.action == RosterAction::copy_character ? "copyCharacter" : c.command.action == RosterAction::upgrade_context ? "upgradeContext" : c.command.action == RosterAction::upgrade_selection ? "upgradeSelection" : c.command.action == RosterAction::upgrade_items ? "upgradeItems" : c.command.action == RosterAction::upgrade_hint ? "upgradeHint" : c.command.action==RosterAction::equipment?"equipment":c.command.action==RosterAction::input_profile?"inputProfile":"rollback";
+    if(c.command.action==RosterAction::control_environment)action="controlEnvironment";
+    if(c.command.action==RosterAction::control_open)action="controlOpen";
+    if(c.command.action==RosterAction::control_pulse)action="controlPulse";
+    if(c.command.action==RosterAction::control_close)action="controlClose";
+    if(c.command.action==RosterAction::upgrade_hook_inspect)action="upgradeHook";
+    if(c.command.action==RosterAction::upgrade_hook_install)action="upgradeHookInstall";
+    if(c.command.action==RosterAction::upgrade_hook_remove)action="upgradeHookRemove";
+    if(c.command.action==RosterAction::upgrade_offer)action="upgradeOffer";
+    if(c.command.action==RosterAction::upgrade_choose)action="upgradeChoose";
+    if(c.command.action==RosterAction::upgrade_choice_close)action="upgradeChoiceClose";
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << "{\"schemaVersion\":1,\"sample\":" << sample << ",\"action\":\"" << action
@@ -342,6 +492,53 @@ std::string result_json(const ProbeContext& c, unsigned sample) {
         out << ']';
     }
     out << '}';
+    const bool environment_requested=c.command.action==RosterAction::control_environment;
+    out << ",\"controlEnvironment\":{\"state\":" << quoted_json(!environment_requested?"not_requested":c.control_status==PlayerReadStatus::Captured?"captured":c.control_status==PlayerReadStatus::NotReady?"not_ready":"error");
+    if(environment_requested&&c.control_status==PlayerReadStatus::Captured) {
+        out<<",\"horizontalActionId\":"<<c.control_environment.horizontal_action_id<<",\"verticalActionId\":"<<c.control_environment.vertical_action_id;
+        const auto named=[&](const char* label,const std::vector<RewiredNamedId>& values){out<<",\""<<label<<"\":[";for(std::size_t i=0;i<values.size();++i){if(i)out<<',';out<<"{\"id\":"<<values[i].id<<",\"name\":"<<quoted_json(values[i].name)<<'}';}out<<']';};
+        named("categories",c.control_environment.categories);named("layouts",c.control_environment.layouts);
+        out<<",\"players\":[";
+        for(std::size_t i=0;i<c.control_environment.players.size();++i){if(i)out<<',';const auto& p=c.control_environment.players[i];out<<"{\"playerId\":"<<p.player_id<<",\"x\":"<<p.horizontal<<",\"y\":"<<p.vertical<<",\"maps\":[";
+            for(std::size_t j=0;j<p.maps.size();++j){if(j)out<<',';const auto& m=p.maps[j];out<<"{\"id\":"<<m.id<<",\"controllerId\":"<<m.controller_id<<",\"controllerType\":"<<m.controller_type<<",\"categoryId\":"<<m.category_id<<",\"layoutId\":"<<m.layout_id<<",\"enabled\":"<<(m.enabled?"true":"false")<<",\"bindings\":[";
+                for(std::size_t n=0;n<m.bindings.size();++n){if(n)out<<',';const auto& b=m.bindings[n];out<<"{\"actionId\":"<<b.action_id<<",\"elementId\":"<<b.element_id<<",\"elementType\":"<<b.element_type<<",\"axisRange\":"<<b.axis_range<<",\"inverted\":"<<(b.inverted?"true":"false")<<'}';}out<<"]}";}out<<"]}";}
+        out<<']';
+    }
+    out<<'}';
+    if(c.control){const auto s=c.control->state();out<<",\"ownedControl\":{\"playerId\":"<<s.player_id<<",\"controllerId\":"<<s.controller_id<<",\"mapId\":"<<s.map_id<<",\"created\":"<<(s.controller_created?"true":"false")<<",\"attached\":"<<(s.controller_attached?"true":"false")<<",\"registered\":"<<(s.map_registered?"true":"false")<<",\"cleanupRequired\":"<<(s.cleanup_required?"true":"false")<<",\"x\":"<<s.horizontal<<",\"y\":"<<s.vertical<<'}';}
+    if(c.command.action==RosterAction::control_pulse){out<<",\"pulse\":{\"nonzeroWritten\":"<<(c.pulse.nonzero_written?"true":"false")<<",\"neutralized\":"<<(c.pulse.neutralized?"true":"false")<<",\"focusLost\":"<<(c.pulse.focus_lost?"true":"false")<<",\"resourcesClosed\":"<<(c.pulse.resources_closed?"true":"false")<<",\"updates\":"<<c.pulse.updates;
+        out<<",\"before\":"<<player_observation_json(c.pulse.before.players.empty()?PlayerReadStatus::NotReady:PlayerReadStatus::Captured,c.pulse.before,c.identity,sample)<<",\"after\":"<<player_observation_json(c.pulse.after.players.empty()?PlayerReadStatus::NotReady:PlayerReadStatus::Captured,c.pulse.after,c.identity,sample)<<'}';}
+    if(c.command.action==RosterAction::upgrade_hook_inspect || c.command.action==RosterAction::upgrade_hook_install || c.command.action==RosterAction::upgrade_hook_remove) {
+        const auto hook=process_upgrade_hook.state();
+        out<<",\"upgradeHook\":{\"prepared\":"<<(hook.prepared?"true":"false")
+           <<",\"ownershipRetained\":"<<(hook.ownership_retained?"true":"false")
+           <<",\"lastVerifiedApplied\":"<<(hook.last_verified_applied?"true":"false")
+           <<",\"protectionPending\":"<<(hook.protection_pending?"true":"false")<<'}';
+    }
+    if(c.command.action==RosterAction::upgrade_hook_inspect) {
+        out<<",\"startupUpgradeGuard\":{\"checked\":"<<(c.startup_patch_checked?"true":"false")
+           <<",\"mappedPatchedMethodVerified\":"<<(c.startup_patch_verified?"true":"false")
+           <<",\"validationError\":"<<quoted_json(c.startup_patch_error)<<'}';
+    }
+    if(c.command.action==RosterAction::upgrade_offer||c.command.action==RosterAction::upgrade_choose||c.command.action==RosterAction::upgrade_choice_close) {
+        const bool offer=c.command.action==RosterAction::upgrade_offer;
+        const char* choice_state=offer?(c.choice_status==PlayerReadStatus::Captured?"captured":c.choice_status==PlayerReadStatus::NotReady?"not_ready":"error"):
+            c.action_succeeded?(c.command.action==RosterAction::upgrade_choose?"callback_returned":"closed"):"error";
+        out<<",\"upgradeChoice\":{\"state\":"<<quoted_json(choice_state)
+           <<",\"invocationAttempted\":"<<(c.choice_result.invocation_attempted?"true":"false")
+           <<",\"invocationReturned\":"<<(c.choice_result.invocation_returned?"true":"false");
+        if(offer&&c.choice_status==PlayerReadStatus::Captured) {
+            out<<",\"token\":"<<quoted_json(std::to_string(c.choice_offer.token))<<",\"inputId\":"<<c.choice_offer.input_id
+               <<",\"actorLevel\":"<<c.choice_offer.actor_level<<",\"cards\":[";
+            for(std::size_t i=0;i<c.choice_offer.cards.size();++i) {
+                const auto& card=c.choice_offer.cards[i];if(i)out<<',';
+                out<<"{\"childIndex\":"<<card.child_index<<",\"weaponType\":"<<card.weapon_type<<",\"currentLevel\":"<<card.current_level
+                   <<",\"isNew\":"<<(card.is_new?"true":"false")<<",\"interactable\":"<<(card.interactable?"true":"false")<<'}';
+            }
+            out<<']';
+        }
+        out<<'}';
+    }
     out << ",\"playerObservation\":" << player_observation_json(c.player_status, c.scene, c.identity, sample)
         << ",\"errors\":{\"action\":" << quoted_json(c.action_error)
         << ",\"roster\":" << quoted_json(c.roster_error)
@@ -376,9 +573,9 @@ void run_coop_roster_probe(HMODULE bridge, HMODULE game, Il2CppApi api,
             throw std::runtime_error("Roster/player metadata contract: " + c.error);
         c.module=game;c.api=api;c.domain=domain;
         attachment.detach();
-        log("WSM_ROSTER_READY: metadata worker detached; eight bounded requests; mutation requires explicit operator-established outside-run phase");
+        log("WSM_ROSTER_READY: metadata worker detached; 32 bounded requests; roster changes require outside-run phase, input changes require separate opt-in");
         const auto deadline = GetTickCount64() + 15ull * 60 * 1000;
-        for (unsigned sample = 1; sample <= 8 && IsWindow(c.window.hwnd); ++sample) {
+        for (unsigned sample = 1; sample <= 32 && IsWindow(c.window.hwnd); ++sample) {
             std::ostringstream number;
             number << std::setw(6) << std::setfill('0') << sample;
             const auto request = directory / ("request-" + number.str());
@@ -389,6 +586,10 @@ void run_coop_roster_probe(HMODULE bridge, HMODULE game, Il2CppApi api,
             c.snapshot = {}; c.configuration = {}; c.configuration_captured = false; c.scene = {}; c.upgrade = {}; c.equipment = {}; c.input_profile = {}; c.identity = {}; c.error.clear();
             c.action_error.clear(); c.roster_error.clear(); c.configuration_error.clear(); c.player_error.clear(); c.upgrade_error.clear();
             c.status = CoopRosterStatus::Error; c.player_status = PlayerReadStatus::Error; c.upgrade_status = PlayerReadStatus::Error; c.equipment_status = PlayerReadStatus::Error; c.input_profile_status = PlayerReadStatus::Error; c.action_succeeded = false;
+            c.control_environment={};c.control_status=PlayerReadStatus::Error;c.pulse={};c.control_error.clear();
+            c.startup_patch_checked=false;c.startup_patch_verified=false;c.startup_patch_error.clear();
+            c.choice_offer={};c.choice_result={};c.choice_status=PlayerReadStatus::Error;
+
             const auto status = run_window_hook(bridge, c.window.hwnd, c.window.thread, execute_command, &c, 2000);
             if (status != HookResult::completed) { c.action_succeeded = false; c.status = CoopRosterStatus::Error; c.player_status = PlayerReadStatus::Error; c.upgrade_status=PlayerReadStatus::Error; c.equipment_status=PlayerReadStatus::Error; c.input_profile_status=PlayerReadStatus::Error; c.error = c.action_error = "Owned Unity roster callback did not complete"; }
             publish_result(directory / ("state-" + number.str() + ".json"), result_json(c, sample));
@@ -397,7 +598,19 @@ void run_coop_roster_probe(HMODULE bridge, HMODULE game, Il2CppApi api,
             if (!c.error.empty()) log("WSM_ROSTER_ERROR: " + c.error);
         }
         log("WSM_ROSTER_STOP: request limit, deadline or owned-window exit");
+        if(process_upgrade_hook.state().ownership_retained)
+            log("WSM_UPGRADE_HOOK_PROCESS_LIFETIME: retained until explicit outside-run removal or process exit");
     } catch (const std::exception& e) { log(std::string("ERROR: roster probe stopped: ") + e.what()); }
+    if(context&&context->control&&context->control->state().cleanup_required&&IsWindow(context->window.hwnd)) {
+        auto cleanup=[](void* raw){auto& c=*static_cast<ProbeContext*>(raw);c.action_succeeded=c.control->close(c.control_error);};
+        const auto done=run_window_hook(bridge,context->window.hwnd,context->window.thread,cleanup,context.get(),2000);
+        log(done==HookResult::completed&&context->action_succeeded?"WSM_CONTROL_CLEANUP: owned resources removed":"ERROR: owned control cleanup unverified; resources retained until process exit");
+    }
+    if(context&&context->choice&&IsWindow(context->window.hwnd)) {
+        auto cleanup=[](void* raw){auto& c=*static_cast<ProbeContext*>(raw);c.action_succeeded=c.choice->close(c.action_error);if(c.action_succeeded)c.choice.reset();};
+        const auto done=run_window_hook(bridge,context->window.hwnd,context->window.thread,cleanup,context.get(),2000);
+        log(done==HookResult::completed&&context->action_succeeded?"WSM_CHOICE_CLEANUP: retained offers released":"ERROR: choice cleanup unverified; roots retained until process exit");
+    }
     if (context && context->roster.has_pending_enrollment())
         log("WSM_ROSTER_PENDING: no automatic engine removal; owned roots retained until process exit");
 }

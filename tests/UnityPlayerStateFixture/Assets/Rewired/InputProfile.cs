@@ -6,13 +6,13 @@ using UnityEngine.Scripting;
 // Original metadata contracts; no vendor input implementation is distributed.
 namespace Rewired
 {
-    [Preserve] public static class ReInput
+    [Preserve] public static partial class ReInput
     {
         public static bool ready = true;
         public static MappingHelper helper = new MappingHelper();
         [Preserve] public static bool isReady => ready;
         [Preserve] public static MappingHelper mapping => helper;
-        [Preserve] public sealed class MappingHelper
+        [Preserve] public sealed partial class MappingHelper
         {
             public int horizontal = 101, vertical = 103;
             [Preserve] public int GetActionId(string name)

@@ -34,6 +34,9 @@ extern "C" {
 
 #define WSM_INGAME_ABI_VERSION 1
 #define WSM_INGAME_STATUS_MAX_BYTES 4096
+#define WSM_INGAME_GAMEPLAY_VERSION 1
+#define WSM_INGAME_GAMEPLAY_REQUEST_MAX_BYTES 262144
+#define WSM_INGAME_GAMEPLAY_EVENT_MAX_BYTES 524288
 
 #define WSM_INGAME_ACCEPTED 0
 #define WSM_INGAME_INVALID_ARGUMENT (-1)
@@ -57,6 +60,51 @@ int wsm_ingame_state(void);
 int wsm_ingame_peer_count(void);
 int wsm_ingame_bound_port(void);
 int wsm_ingame_shutdown(void);
+
+// Optional gameplay transport, separate from engine integration. Never infer
+// that an accepted request has changed Unity or been received by another peer.
+// info uses the status buffer convention and reports epoch/role/playerId/active/error.
+// submit accepts camelCase JSON with kind and positive requestId. Guests may
+// send input{x,y} or upgrade{level,choice}; identity is assigned by the session.
+// Hosts may send snapshot{snapshot:{tick,entities,enemies:[]}} or reward{reward:...}.
+// Payload fields are flattened at the request root, except snapshot and reward.
+// poll(NULL,0) queries the next event length, 0 means none. Sufficient capacity
+// copies UTF-8+NUL and consumes it; -5 consumes nothing and leaves bytes alone.
+// Events are camelCase JSON with epoch, eventId, kind, playerId, requestId and
+// ageMilliseconds; nullable fields may be absent. Kinds: joined, left, input,
+// upgrade, snapshot, reward, submission, undelivered, ended. Corresponding payloads are in
+// input/upgrade/snapshot/reward; submission carries the original requestId and
+// optional error (including "cancelled"), absent error means local send succeeded,
+// not remote application. ended carries error; non-submission requestId is 0.
+// Event IDs represent creation order, but an ended event can be delivered after
+// later-created reliable submissions/events. Join precedes that player's commands
+// and leave; terminal delivery waits for retained reliable events and submissions.
+// On host-reader failure, admitted Core joins are reconciled after producers stop.
+// A held upgrade without available join provenance is retained as kind undelivered,
+// with its original playerId/upgrade and error join_unconfirmed_at_session_end.
+// It is not a normal applicable upgrade and does not fabricate a joined event.
+// Consume this failure before reconnect; terminal follows it. Coalescible held
+// movement is discarded at teardown. Shutdown spill is capped by 512 pre-join slots.
+// Input ageMilliseconds is receiver-clock age: reject stale movement before
+// creating a local lease. Movement and snapshots coalesce, rewards do not.
+// Submit returns -3 when its 32-slot outgoing queue or 512 pending-result slots
+// are full; rejected requests are not reserved. Duplicate pending IDs return -1.
+// Up to 512 non-lifecycle control events and 512 pre-join events are buffered;
+// overflow can terminate the gameplay session, not silently drop choices. Lifecycle
+// backlog is bounded by 1024 known and 100000 departed player identities; it is
+// not capped at 512 and retains join/leave. The 100000 receipt ledger is bounded.
+// Core's separate 128-entry reward notification channel still terminates receive
+// on overflow; receipts already recorded in the ledger are reconciled, but session
+// liveness and rewards not yet accepted by Core are not guaranteed.
+// Leave explicitly abandons queued data; host loss retains reliable events.
+// A new connection is refused while unconsumed retained reliable events exist.
+// Native callers must poll on their own bounded main-thread handoff, not call
+// Unity from any network task. No frame/update timing guarantee is made here.
+int wsm_ingame_gameplay_version(void);
+int wsm_ingame_gameplay_epoch(void);
+int wsm_ingame_gameplay_info(uint8_t* buffer, int capacity);
+int wsm_ingame_gameplay_submit(int expectedEpoch, const uint8_t* json, int length);
+int wsm_ingame_gameplay_poll(uint8_t* buffer, int capacity);
 
 #ifdef __cplusplus
 }

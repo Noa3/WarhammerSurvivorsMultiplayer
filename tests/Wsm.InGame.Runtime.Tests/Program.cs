@@ -5,13 +5,36 @@ using System.Text;
 using Wsm.Core;
 using Wsm.InGame.Runtime;
 
-// Managed regression runner for the in-game session controller. Every scenario uses real
-// loopback TCP; no protocol responses are faked.
+// Managed regression runner for the in-game session controller. Network scenarios
+// use real loopback TCP; direct mailbox cases isolate deterministic ordering guards.
 
 var failures = new List<string>();
+// An optional substring argument selects scenarios, so one regression can be re-run without
+// the full multi-minute suite. No argument keeps the complete suite.
+var filter = args.Length > 0 ? args[0] : null;
+var matched = 0;
 foreach (var (name, test) in new (string, Func<Task>)[]
 {
     ("host and guest roundtrip with cleanup", HostAndGuestRoundtrip),
+    ("mailbox reliable events survive continuous input", GameplayBridgeTests.MailboxFairness),
+    ("idle reward polling avoids ledger allocation", GameplayBridgeTests.IdleRewardPollingAllocation),
+    ("cancelled in-flight submission releases retained mailbox", GameplayBridgeTests.CancelledInflight),
+    ("unpolled lifecycle burst remains available", GameplayBridgeTests.LifecycleBurst),
+    ("preview host survives unpolled TCP churn", GameplayBridgeTests.PreviewHostChurn),
+    ("terminal waits for reliable events", GameplayBridgeTests.TerminalAfterReliable),
+    ("pre-join accepted upgrade survives independent reader failure", GameplayBridgeTests.PreJoinUpgradeSurvivesReaderFailure),
+    ("pre-join missing provenance retains explicit failure", GameplayBridgeTests.PreJoinWithoutProvenanceRetainsFailure),
+    ("each submission retains its correlated success or failure", GameplayBridgeTests.SubmissionResults),
+    ("pending request ids are unique and reusable after completion", GameplayBridgeTests.DuplicatePendingRequest),
+    ("gameplay input crosses real TCP into native polling mailbox", GameplayBridgeTests.InputRoundtrip),
+    ("reported input follows its own join", GameplayBridgeTests.InputFollowsJoinUnderSlowLifecycleReader),
+    ("reported join precedes leave for a quick disconnect", GameplayBridgeTests.JoinPrecedesLeaveUnderSlowLifecycleReader),
+    ("gameplay world and recipient-private rewards and choices cross TCP", GameplayBridgeTests.WorldAndPersonalRewards),
+    ("gameplay buffer refusal and session epoch isolation", GameplayBridgeTests.CapacityAndEpoch),
+    ("gameplay malformed and unauthorized requests rejected with valid retry", GameplayBridgeTests.Validation),
+    ("stalled consumer retains accepted rewards past channel capacity", GameplayBridgeTests.RewardsSurviveStalledPump),
+    ("stalled bridge reconciles full ledger after host loss", GameplayBridgeTests.StalledBridgeReconcilesLedgerAfterHostLoss),
+    ("gameplay unpolled reward burst retained across host loss", GameplayBridgeTests.RewardsSurviveUnpolledBurstAndHostLoss),
     ("join refused is classified and retry succeeds", JoinRefusedThenRetry),
     ("join deadline expires against a silent listener", JoinTimeout),
     ("full lobby is classified as hostfull", FullLobby),
@@ -30,9 +53,12 @@ foreach (var (name, test) in new (string, Func<Task>)[]
     ("status text stays bounded and German", StatusTextContract),
 })
 {
+    if (filter is not null && !name.Contains(filter, StringComparison.OrdinalIgnoreCase)) continue;
+    matched++;
     try { await test(); Console.WriteLine("PASS " + name); }
     catch (Exception ex) { failures.Add(name + ": " + ex.Message); Console.WriteLine("FAIL " + name + " -> " + ex.Message); }
 }
+if (matched == 0) throw new Exception($"No scenarios matched filter: {filter}");
 if (failures.Count != 0) throw new Exception($"{failures.Count} scenario(s) failed: {string.Join(" | ", failures)}");
 Console.WriteLine("PASS ingame runtime controller suite");
 

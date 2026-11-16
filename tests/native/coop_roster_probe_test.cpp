@@ -11,6 +11,14 @@ int main(int argc, char** argv) {
     auto check = [&](const char* name, bool ok) { ++count; if (!ok) ++failed; std::cout << (ok ? "PASS " : "FAIL ") << name << '\n'; };
     using namespace wsm;
     RosterCommand command;
+    wchar_t previous_hook_flag[128]{};
+    const DWORD previous_hook_length=GetEnvironmentVariableW(L"WSM_UPGRADE_PASS_HOOK_OPT_IN",previous_hook_flag,128);
+    if(previous_hook_length>=128){std::cerr<<"Cannot preserve oversized test flag\n";return 1;}
+    check("unset upgrade permission",SetEnvironmentVariableW(L"WSM_UPGRADE_PASS_HOOK_OPT_IN",nullptr)&&!upgrade_hook_opt_in());
+    check("explicit separate upgrade permission",SetEnvironmentVariableW(L"WSM_UPGRADE_PASS_HOOK_OPT_IN",L"1")&&upgrade_hook_opt_in());
+    check("ambiguous upgrade permission refused",SetEnvironmentVariableW(L"WSM_UPGRADE_PASS_HOOK_OPT_IN",L"true")&&!upgrade_hook_opt_in());
+    check("extended upgrade permission refused",SetEnvironmentVariableW(L"WSM_UPGRADE_PASS_HOOK_OPT_IN",L"1 ")&&!upgrade_hook_opt_in());
+    check("restore process-local test flag",SetEnvironmentVariableW(L"WSM_UPGRADE_PASS_HOOK_OPT_IN",previous_hook_length?previous_hook_flag:nullptr)!=FALSE);
     check("inspect command", parse_command("inspect\r\n", 1234, command) && command.action == RosterAction::inspect);
     check("own PID enrollment", parse_command("enroll:1234:41", 1234, command) && command.action == RosterAction::enroll && command.player == 41);
     check("own PID rollback", parse_command("rollback:1234", 1234, command) && command.action == RosterAction::rollback);
@@ -39,6 +47,80 @@ int main(int argc, char** argv) {
     check("own PID explicit input profile query",parse_command("inputProfile:1234",1234,profile_command)&&profile_command.action==RosterAction::input_profile&&profile_command.player==-1);
     check("wrong PID explicit input profile query",!parse_command("inputProfile:1235",1234,profile_command));
     check("input profile cannot enter mutation dispatch",!mutates_roster(RosterAction::input_profile));
+    check("own PID controller environment route",parse_command("controlEnvironment:1234",1234,command));
+    check("own PID controller open route",parse_command("controlOpen:1234:7:17:23:2:9",1234,command));
+    check("own PID bounded controller pulse route",parse_command("controlPulse:1234:0.5:-0.25:120",1234,command));
+    check("own PID controller cleanup route",parse_command("controlClose:1234",1234,command));
+    check("own PID upgrade hook inspection route",parse_command("upgradeHook:1234",1234,command));
+    check("own PID upgrade hook install route",parse_command("upgradeHookInstall:1234",1234,command));
+    check("own PID upgrade hook removal route",parse_command("upgradeHookRemove:1234",1234,command));
+    check("own PID current upgrade offer route",parse_command("upgradeOffer:1234:52",1234,command));
+    check("own PID bound upgrade choice route",parse_command("upgradeChoose:1234:27:52:0:7001",1234,command));
+    check("upgrade choice preserves explicit owner and token",command.action==RosterAction::upgrade_choose&&command.choice_token==27&&command.player==52&&command.choice_index==0&&command.choice_weapon==7001);
+    check("upgrade choice closes only own PID",parse_command("upgradeChoiceClose:1234",1234,command)&&command.action==RosterAction::upgrade_choice_close&&!parse_command("upgradeChoiceClose:1235",1234,command));
+    for(const auto* value:{"upgradeOffer:1235:52","upgradeOffer:1234:-1","upgradeOffer:1234:52:0",
+        "upgradeChoose:1235:27:52:0:7001","upgradeChoose:1234:0:52:0:7001","upgradeChoose:1234:27:52:-1:7001",
+        "upgradeChoose:1234:27:52:32:7001","upgradeChoose:1234:27:52:0:0","upgradeChoose:1234:27:52:0:7001:9",
+        "upgradeChoose:1234:27:52:0:7001\ninspect","upgradeChoiceClose:1234:0"})
+        check(value,!parse_command(value,1234,command));
+    const auto max_token=std::to_string((std::numeric_limits<std::uint64_t>::max)());
+    check("upgrade choice accepts exact UInt64 token",parse_command("upgradeChoose:1234:"+max_token+":52:0:7001",1234,command)&&command.choice_token==(std::numeric_limits<std::uint64_t>::max)());
+    check("upgrade choice rejects token overflow",!parse_command("upgradeChoose:1234:"+max_token+"0:52:0:7001",1234,command));
+    wchar_t previous_choice_flag[128]{};
+    const DWORD previous_choice_length=GetEnvironmentVariableW(L"WSM_UPGRADE_CHOICE_OPT_IN",previous_choice_flag,128);
+    if(previous_choice_length>=128)return 1;
+    check("choice permission defaults closed",SetEnvironmentVariableW(L"WSM_UPGRADE_CHOICE_OPT_IN",nullptr)&&!upgrade_choice_opt_in());
+    for(const auto action:{RosterAction::upgrade_offer,RosterAction::upgrade_choose}) {
+        ProbeContext refused;refused.command.action=action;execute_command(&refused);
+        check("choice refuses before touching uninitialized runtime",!refused.action_succeeded&&!refused.choice_result.invocation_attempted&&refused.action_error=="Upgrade selection requires separate WSM_UPGRADE_CHOICE_OPT_IN=1");
+    }
+    check("choice permission accepts exact one",SetEnvironmentVariableW(L"WSM_UPGRADE_CHOICE_OPT_IN",L"1")&&upgrade_choice_opt_in());
+    check("choice permission rejects truthy text",SetEnvironmentVariableW(L"WSM_UPGRADE_CHOICE_OPT_IN",L"true")&&!upgrade_choice_opt_in());
+    check("choice permission restores prior value",SetEnvironmentVariableW(L"WSM_UPGRADE_CHOICE_OPT_IN",previous_choice_length?previous_choice_flag:nullptr)!=FALSE);
+    ProbeContext choice_json;choice_json.command.action=RosterAction::upgrade_offer;
+    choice_json.choice_status=PlayerReadStatus::Captured;choice_json.choice_offer.token=(std::numeric_limits<std::uint64_t>::max)();
+    choice_json.choice_offer.input_id=52;choice_json.choice_offer.actor_level=5;choice_json.choice_offer.cards={{0,7001,1,true,true}};
+    const auto offer_json=result_json(choice_json,0);
+    check("offer token serializes losslessly as string",offer_json.find("\"token\":\""+max_token+"\"")!=std::string::npos&&offer_json.find("\"weaponType\":7001")!=std::string::npos);
+    choice_json.choice_status=PlayerReadStatus::Error;
+    check("refused offer suppresses stale cards",result_json(choice_json,0).find("\"token\"")==std::string::npos);
+    choice_json.command.action=RosterAction::upgrade_choose;choice_json.action_succeeded=true;choice_json.choice_result={true,true};
+    check("choice response claims callback completion not game application",result_json(choice_json,0).find("\"state\":\"callback_returned\"")!=std::string::npos&&result_json(choice_json,0).find("\"invocationReturned\":true")!=std::string::npos);
+    for(const auto* value:{"upgradeHook:1235","upgradeHookInstall:1235","upgradeHookRemove:1235","upgradeHookInstall:1234:0","upgradeHookRemove:1234\ninspect"})
+        check(value,!parse_command(value,1234,command));
+    check("upgrade hook install has distinct mutation route",parse_command("upgradeHookInstall:1234",1234,command)&&command.action==RosterAction::upgrade_hook_install);
+    check("upgrade hook query remains distinct",parse_command("upgradeHook:1234",1234,command)&&command.action==RosterAction::upgrade_hook_inspect&&!mutates_roster(command.action));
+    check("parsed controller options preserve nondefault IDs",parse_command("controlOpen:1234:7:17:23:2:9",1234,command)&&
+        command.action==RosterAction::control_open&&command.control.player_id==1&&command.control.source_id==7&&command.control.category_id==17&&command.control.layout_id==23&&command.control.horizontal_axis_id==2&&command.control.vertical_axis_id==9);
+    check("parsed pulse preserves axes and bound",parse_command("controlPulse:1234:0.5:-0.25:250",1234,command)&&command.action==RosterAction::control_pulse&&command.x==0.5f&&command.y==-0.25f&&command.duration==250);
+    {
+        wchar_t previous[128]{};
+        const DWORD length=GetEnvironmentVariableW(L"WSM_COOP_CONTROL_OPT_IN",previous,128);
+        if(length>=128)return 1;
+        for(const auto* flag:{static_cast<const wchar_t*>(nullptr),L"1"}) {
+            check("set pulse permission for admission test",SetEnvironmentVariableW(L"WSM_COOP_CONTROL_OPT_IN",flag)!=FALSE);
+            ProbeContext refused;refused.command=command;
+            execute_command(&refused);
+            check("pulse refuses before runtime access even with opt-in",!refused.action_succeeded&&refused.action_error=="Input pulse disabled: persistent cleanup and retry owner unavailable"&&!refused.control);
+        }
+        check("restore pulse permission",SetEnvironmentVariableW(L"WSM_COOP_CONTROL_OPT_IN",length?previous:nullptr)!=FALSE);
+        ProbeContext existing;existing.command=command;
+        existing.control=std::make_unique<RewiredControllerSession>();
+        auto* owner=existing.control.get();
+        for(int retry=0;retry<2;++retry) {
+            existing.action_succeeded=true;
+            execute_command(&existing);
+            const auto response=result_json(existing,1);
+            check("repeated pulse refusals retain controller owner and report no write",existing.control.get()==owner&&!existing.action_succeeded&&
+                response.find("\"actionSucceeded\":false")!=std::string::npos&&response.find("\"nonzeroWritten\":false")!=std::string::npos&&
+                response.find("\"neutralized\":false")!=std::string::npos);
+        }
+    }
+    for(const auto* value:{"controlEnvironment:1235","controlClose:1235","controlOpen:1235:7:17:23:2:9","controlPulse:1235:1:0:120",
+        "controlOpen:1234:-1:17:23:2:9","controlOpen:1234:7:17:23:2:2","controlOpen:1234:7:17:23:2:9:0",
+        "controlPulse:1234:nan:0:120","controlPulse:1234:inf:0:120","controlPulse:1234:1.01:0:120","controlPulse:1234:0:0:120",
+        "controlPulse:1234:1:0:0","controlPulse:1234:1:0:251","controlPulse:1234:1:0:-1","controlClose:1234\nrollback:1234"})
+        check(value,!parse_command(value,1234,command));
     for(const auto* value:{"inputProfile:","inputProfile:-1234","inputProfile:1234:0","inputProfile:1234\nrollback:1234"})
         check(value,!parse_command(value,1234,profile_command));
     for(const auto* value:{"equipment:","equipment:-1234","equipment:1234:0","equipment:1234\nrollback:1234"})
@@ -58,6 +140,19 @@ int main(int argc, char** argv) {
     check("bounded command", !parse_command(std::string(97, 'x'), 1234, command));
     check("Int32 maximum ID", parse_command("enroll:1234:" + std::to_string((std::numeric_limits<std::int32_t>::max)()), 1234, command));
     ProbeContext c;
+    check("set permission for quiescence-policy test",SetEnvironmentVariableW(L"WSM_UPGRADE_PASS_HOOK_OPT_IN",L"1")!=FALSE);
+    for(const auto action:{RosterAction::upgrade_hook_install,RosterAction::upgrade_hook_remove}) {
+        ProbeContext refused;refused.command.action=action;
+        execute_command(&refused);
+        check("upgrade mutation fails closed without established quiescence",!refused.action_succeeded&&refused.action_error=="Upgrade hook mutation disabled: no verified quiescent patch window"&&!process_upgrade_hook.state().ownership_retained);
+    }
+    check("restore permission after quiescence-policy test",SetEnvironmentVariableW(L"WSM_UPGRADE_PASS_HOOK_OPT_IN",previous_hook_length?previous_hook_flag:nullptr)!=FALSE);
+    c.command={RosterAction::upgrade_hook_inspect,-1};
+    auto hook_json=result_json(c,0);
+    check("mapped upgrade guard is independently reported unverified",hook_json.find("\"mappedPatchedMethodVerified\":false")!=std::string::npos);
+    check("upgrade hook state is explicit and initially unowned",hook_json.find("\"action\":\"upgradeHook\"")!=std::string::npos&&hook_json.find("\"upgradeHook\":{\"prepared\":false,\"ownershipRetained\":false,\"lastVerifiedApplied\":false,\"protectionPending\":false}")!=std::string::npos);
+    c.command={RosterAction::inspect,-1};
+    check("ordinary inspection omits upgrade hook claim",result_json(c,0).find("\"upgradeHook\"")==std::string::npos);
     c.status = CoopRosterStatus::Captured;
     c.snapshot.configured_ids = {0, 41}; c.snapshot.enrolled_ids = {0};
     auto text = result_json(c, 1);
@@ -172,6 +267,15 @@ int main(int argc, char** argv) {
     check("input profile not ready suppresses stale definitions",profile_json.find("\"inputProfile\":{\"state\":\"not_ready\"}")!=std::string::npos);
     c.command={RosterAction::inspect,-1};c.input_profile_status=PlayerReadStatus::Captured;profile_json=result_json(c,27);
     check("ordinary inspection never exposes stale input profile",profile_json.find("\"inputProfile\":{\"state\":\"not_requested\"}")!=std::string::npos);
+    c.command={RosterAction::control_environment,-1};c.control_status=PlayerReadStatus::Captured;
+    c.control_environment.horizontal_action_id=101;c.control_environment.vertical_action_id=103;
+    c.control_environment.categories={{17,"Gameplay"}};c.control_environment.layouts={{23,"CustomDefault"}};
+    auto controls_json=result_json(c,28);
+    check("explicit controller environment serializes typed nondefault IDs",controls_json.find("\"action\":\"controlEnvironment\"")!=std::string::npos&&controls_json.find("\"horizontalActionId\":101,\"verticalActionId\":103,\"categories\":[{\"id\":17,\"name\":\"Gameplay\"}]")!=std::string::npos);
+    c.control_status=PlayerReadStatus::Error;controls_json=result_json(c,29);
+    check("controller error suppresses stale environment",controls_json.find("\"controlEnvironment\":{\"state\":\"error\"}")!=std::string::npos);
+    c.command={RosterAction::inspect,-1};c.control_status=PlayerReadStatus::Captured;controls_json=result_json(c,30);
+    check("unrequested controller query suppresses stale environment",controls_json.find("\"controlEnvironment\":{\"state\":\"not_requested\"}")!=std::string::npos);
     if (!std::filesystem::create_directory(directory)) return 2;
     try {
         const auto request = directory / "request";

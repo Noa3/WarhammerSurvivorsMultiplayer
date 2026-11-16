@@ -9,6 +9,18 @@ namespace { std::string g_reason;
 void note(const char* tag,const std::string& detail,int status){ g_reason=std::string(tag)+" status="+std::to_string(status)+" detail="+(detail.empty()?"-":detail); }
 std::string player(const wsm::PlayerStateSnapshot& p){ return "("+std::to_string(p.x)+","+std::to_string(p.y)+",hp="+std::to_string(p.hp)+",xp="+std::to_string(p.xp)+",level="+std::to_string(p.level)+",input="+std::to_string(p.input_id)+",kind="+std::to_string(p.character_type)+",dead="+(p.dead?"1":"0")+")"; } }
 extern "C" __declspec(dllexport) const char* __cdecl fixture_reason() { return g_reason.c_str(); }
+extern "C" __declspec(dllexport) int __cdecl fixture_run_state(int managed, unsigned os, int mode) {
+    g_reason.clear();auto module=GetModuleHandleW(L"GameAssembly.dll");wsm::Il2CppApi api;std::string error;
+    wsm::PlayerStateReader reader;
+    if(!module||!wsm::Il2CppApi::resolve(module,api,error)||!api.resolve_probe(module,error)||
+       !reader.initialize(module,api,api.domain_get(),os,managed,error)){note("run_gate_init",error,110);return 110;}
+    bool running=true;auto status=reader.read_run_state(running,error);
+    const bool ok=mode==2?status==wsm::PlayerReadStatus::NotReady&&running&&error.empty():
+                  mode==3?status==wsm::PlayerReadStatus::Error&&running&&!error.empty():
+                  status==wsm::PlayerReadStatus::Captured&&error.empty()&&running==(mode==0);
+    if(!ok)note("run_gate",error,111);
+    return ok?0:111;
+}
 extern "C" __declspec(dllexport) int __cdecl fixture_input_profile(int managed,unsigned os,int mode) {
     g_reason.clear();auto module=GetModuleHandleW(L"GameAssembly.dll");wsm::Il2CppApi api;std::string error;
     if(!module||!wsm::Il2CppApi::resolve(module,api,error)||!api.resolve_probe(module,error))return 50;

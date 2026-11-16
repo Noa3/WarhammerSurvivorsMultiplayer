@@ -8,6 +8,20 @@ cmake --build artifacts/native-build --config Release
 ctest --test-dir artifacts/native-build -C Release --output-on-failure
 ```
 
+## Experimental player adapters
+
+The source includes secondary-controller resource management, bounded remote-input leases and an active-owner upgrade-choice controller. These are developer components, not a connected gameplay adapter. The ordinary connection preview does not enable their diagnostic mutation routes.
+
+The input library is tested against original Unity fixtures for controller ownership, neutralization and cleanup. Independent movement and combat attribution in the target game are still unverified. The upgrade library captures a bounded card offer and revalidates its owner, scene, item and one-shot token before invoking a selection callback. Invalid weapon types and stale or disabled choices are refused. Fixture callback effects do not establish compatibility with the target game's upgrade handler, repair its normal UI routing or provide separate native XP.
+
+Diagnostic nonzero input pulses are unavailable until a persistent neutralization and cleanup-retry owner exists. Runtime `UpgradePassHook.install` and `remove` also refuse mutation because a stopped run does not prove that other threads are outside the patched code. Neutral controller inspection/open/close, low-level fixture tests and the separate owned-startup debugger remain available. Neither a command deadline nor a lease guarantees neutralization while Unity cannot execute its callback.
+
+The managed gameplay ABI carries validated session messages, including recipient-private progression receipts. Native-ABI and TCP tests cover that transport boundary; they do not apply those messages to game objects or synchronize enemies. The original `tests/UnityPlayerStateFixture` sources cover the IL2CPP adapters separately from the normal repository verifier and require a compatible Unity editor to build. Do not redistribute installed game files as fixture dependencies.
+
+Adapters must poll regularly. Core's separate 128-entry reward notification queue can stop the receiving session when full. The adapter reconciles receipts already accepted into Core's bounded ledger, but this does not guarantee continued connectivity or delivery of rewards Core has not accepted. The [gameplay ABI header](../src/Wsm.InGame.Runtime/native/wsm_ingame_abi.h) specifies the event kinds, request correlation and queue limits.
+
+## Scene probes
+
 The bridge needs `WSM_GAME_LOG` to point to the current game's Unity log and `WSM_BRIDGE_LOG` to a writable bridge log. It waits for the game's managed version startup line before touching IL2CPP. Metadata-only inspection remains the default. `inspection thread detached` is its completion receipt. Never use a stale game log as proof that this process has started scripting.
 
 Set `WSM_MAIN_THREAD_PROBE=1` to request one active-scene observation. The bridge finds a top-level `UnityWndClass` belonging to its own process and schedules the callback using a registered Windows message. The scheduler checks the target HWND, a per-invocation nonce and `PM_REMOVE`; ordinary messages cannot trigger it. Calls can be repeated, while overlapping calls fail. Acquisition has a 45-second deadline. A callback that has already started must finish before its caller returns and cannot safely be interrupted. C++ callback exceptions produce a failed result. The scheduler pins its actual containing module for the process lifetime, so return from scheduling is not permission to unload its code.

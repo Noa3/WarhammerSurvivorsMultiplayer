@@ -48,6 +48,19 @@ namespace Wilson.UI
         [Preserve] private VampireSurvivors.Framework.LevelUpFactory _levelUpFactory;
         [Preserve] private UIGroup<Transform> _ChoiceContainerGroup;
         [Preserve] private GameObject _FourthOptionHint;
+        public bool ChoicesAnimating;
+        public int SelectionCount;
+        public CharacterController LastChoiceOwner;
+        public VampireSurvivors.Data.WeaponType LastChoiceType;
+        [Preserve] public bool AreChoicesAnimating => ChoicesAnimating;
+        public void RecordChoice(VampireSurvivors.Data.WeaponType type)
+        {
+            var owner = _gameSession.ActiveCharacter;
+            owner.WeaponsManager.ActiveEquipment.Add(new VampireSurvivors.Objects.Equipment { owner = owner, kind = type });
+            LastChoiceOwner = owner;
+            LastChoiceType = type;
+            ++SelectionCount;
+        }
         public void ConfigureHint(GameObject hint) { _FourthOptionHint = hint; }
         public void ConfigureChoiceGroup(UIGroup<Transform> group) { _ChoiceContainerGroup = group; }
         public void Configure(VampireSurvivors.Framework.GameSessionData session,

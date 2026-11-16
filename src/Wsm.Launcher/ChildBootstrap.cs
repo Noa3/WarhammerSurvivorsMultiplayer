@@ -11,12 +11,18 @@ namespace Wsm.Launcher;
 public sealed class ChildBootstrap : IDisposable
 {
     public Process Process { get; }
+    public bool UpgradeGuardApplied { get; }
     private bool disposed;
 
-    private ChildBootstrap(Process process) => Process = process;
+    private ChildBootstrap(Process process, bool upgradeGuardApplied = false)
+    {
+        Process = process;
+        UpgradeGuardApplied = upgradeGuardApplied;
+    }
 
     public static ChildBootstrap Start(string executable, string bridge, string log, IEnumerable<string> arguments,
-        string? gameLog = null, bool mainThreadProbe = false, bool enableLocalCoop = false, bool enableInGameUi = false)
+        string? gameLog = null, bool mainThreadProbe = false, bool enableLocalCoop = false, bool enableInGameUi = false,
+        bool enableUpgradeGuard = false)
     {
         if (!Environment.Is64BitProcess) throw new PlatformNotSupportedException("Use a Windows x64 .NET process.");
         executable = Path.GetFullPath(executable);
@@ -26,6 +32,8 @@ public sealed class ChildBootstrap : IDisposable
         GameInspection.RequireNativeX64(bridge);
         RuntimePreparation.RejectReparseAncestors(Path.GetDirectoryName(executable)!);
         RuntimePreparation.RejectReparseAncestors(Path.GetDirectoryName(bridge)!);
+        using var profile = enableUpgradeGuard ?
+            StartupUpgradeProfile.Create(Path.GetDirectoryName(executable)!, CancellationToken.None) : null;
         Directory.CreateDirectory(Path.GetDirectoryName(log)!);
         if (File.Exists(log)) throw new IOException("Choose a fresh bridge log path to avoid mistaking an old result for success.");
         var info = new ProcessStartInfo(executable)
@@ -42,10 +50,19 @@ public sealed class ChildBootstrap : IDisposable
         info.Environment["SteamAppId"] = "3669620";
         info.Environment["SteamGameId"] = "3669620";
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
-        var process = Process.Start(info) ?? throw new IOException("The game process did not start.");
-        var child = new ChildBootstrap(process);
+        var applied = false;
+        var process = profile == null ? Process.Start(info) ?? throw new IOException("The game process did not start.") :
+            StartupDebugProcess.Start(info, profile.AssemblyPath, image =>
+            {
+                profile.ValidateMappedHeaders(image.ReadImage(0, profile.HeaderReadSize));
+                image.ReplaceCodeByte(StartupUpgradeProfile.MethodRva, StartupUpgradeProfile.PatchOffset,
+                    profile.OriginalMethod, profile.PatchedMethod);
+                applied = true;
+            }, CancellationToken.None, TimeSpan.FromSeconds(30));
+        var child = new ChildBootstrap(process, applied);
         try
         {
+            if (enableUpgradeGuard && !applied) throw new IOException("Startup upgrade guard was not applied.");
             child.LoadBridge(bridge, TimeSpan.FromSeconds(15));
             return child;
         }

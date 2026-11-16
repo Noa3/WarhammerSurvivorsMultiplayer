@@ -19,10 +19,10 @@ public enum TransitionResult
 /// Owns exactly one Wsm.Core TCP session (host or guest) inside the game process.
 /// Every public method is safe to call from the Unity main thread: connection setup and all
 /// receive loops run on background tasks, and <see cref="Status"/> is an immutable snapshot.
-/// The type never starts gameplay, ticks encounters or executes bots; it only keeps the
-/// lobby transport alive so a later gameplay adapter can take over.
+/// The type exposes bounded gameplay mailboxes, but never calls engine APIs,
+/// starts gameplay, ticks encounters or executes bots itself.
 /// </summary>
-public sealed class IngameSessionController : IAsyncDisposable
+public sealed partial class IngameSessionController : IAsyncDisposable
 {
     /// <summary>Default bind port used by the native in-game menu.</summary>
     public const int DefaultPort = 7780;
@@ -47,6 +47,7 @@ public sealed class IngameSessionController : IAsyncDisposable
     internal Action? BeforeOperationStart { get; set; }
     internal Action? BeforeSessionAdmission { get; set; }
     internal Action? AfterResourcesReleased { get; set; }
+    internal Func<string, TimeSpan>? StallGameplayChannelForTests { get; set; }
 
     public IngameSessionController(SessionSettings? settings = null) =>
         this.settings = settings ?? new SessionSettings(MaxClients, DeathMode.AllDead, 0, BotDifficulty.Normal);
@@ -57,6 +58,9 @@ public sealed class IngameSessionController : IAsyncDisposable
     private sealed class Session(int generation)
     {
         public int Generation { get; } = generation;
+        public GameplayMailbox Gameplay { get; } = new(generation);
+        public Channel<GameplayRequest> GameplayOutgoing { get; } = Channel.CreateBounded<GameplayRequest>(
+            new BoundedChannelOptions(32) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true });
         public CancellationTokenSource Cancellation { get; } = new();
         public SessionHost? Host { get; set; }
         public SessionClient? Client { get; set; }
@@ -89,7 +93,8 @@ public sealed class IngameSessionController : IAsyncDisposable
             lock (gate)
             {
                 if (disposed != 0) return TransitionResult.Failed;
-                if (active is not null || pendingRelease is not null) return TransitionResult.Busy;
+                if (active is not null || pendingRelease is not null || retainedGameplay?.HasReliable == true) return TransitionResult.Busy;
+                retainedGameplay = null;
                 session = new Session(++generation);
                 active = session;
             }
@@ -162,7 +167,8 @@ public sealed class IngameSessionController : IAsyncDisposable
             lock (gate)
             {
                 if (disposed != 0) return TransitionResult.Failed;
-                if (active is not null || pendingRelease is not null) return TransitionResult.Busy;
+                if (active is not null || pendingRelease is not null || retainedGameplay?.HasReliable == true) return TransitionResult.Busy;
+                retainedGameplay = null;
                 session = new Session(++generation);
                 active = session;
             }
@@ -224,6 +230,9 @@ public sealed class IngameSessionController : IAsyncDisposable
             lock (gate)
             {
                 session = pendingRelease ?? active;
+                retainedGameplay?.Clear();
+                retainedGameplay = null;
+                session?.Gameplay.Clear();
                 active = null;
                 if (session is not null)
                 {
@@ -329,17 +338,7 @@ public sealed class IngameSessionController : IAsyncDisposable
             if (ReferenceEquals(active, session)) Publish(state, failure, peers, port, endpoint, lan);
     }
 
-    private async Task HostPumpAsync(Session session, SessionHost host)
-    {
-        var token = session.Cancellation.Token;
-        // Remote input is drained and discarded: the lobby has no gameplay adapter yet, and the
-        // bounded command channel would otherwise drop peers once 128 frames arrive.
-        Task commands = DrainAsync(host.Commands, token);
-        Task joined = DrainAsync(host.Joined, token, () => PublishHosting(session, host));
-        Task disconnected = DrainAsync(host.Disconnected, token, () => PublishHosting(session, host));
-        try { await Task.WhenAll(commands, joined, disconnected).ConfigureAwait(false); }
-        catch (Exception) { /* channels complete on disposal */ }
-    }
+    private Task HostPumpAsync(Session session, SessionHost host) => HostGameplayPumpAsync(session, host);
 
     private void PublishHosting(Session session, SessionHost host)
     {
@@ -352,50 +351,7 @@ public sealed class IngameSessionController : IAsyncDisposable
         }
     }
 
-    private async Task GuestPumpAsync(Session session, SessionClient client)
-    {
-        var token = session.Cancellation.Token;
-        // Unused snapshots and rewards must be drained: the reward channel is bounded with
-        // FullMode.Wait, so an undrained reader would stall or kill the receive loop.
-        Task snapshots = DrainAsync(client.Snapshots, token);
-        Task rewards = DrainAsync(client.Rewards, token);
-        try { await client.Snapshots.Completion.ConfigureAwait(false); }
-        catch (Exception) { /* treated as host loss below */ }
-        try { await Task.WhenAll(snapshots, rewards).ConfigureAwait(false); } catch (Exception) { }
-        lock (gate)
-        {
-            if (!ReferenceEquals(active, session)) return;
-            active = null;
-            pendingRelease = session;
-            session.Abandoned = true;
-            PublishDisconnected(IngameFailure.HostLost);
-        }
-        // Release awaits this pump, so run it after returning rather than self-awaiting.
-        session.LossCleanup = Task.Run(async () =>
-        {
-            try
-            {
-                await ReleaseAsync(session).ConfigureAwait(false);
-                lock (gate) if (ReferenceEquals(pendingRelease, session)) { pendingRelease = null; session.Cancellation.Dispose(); }
-            }
-            catch (Exception error)
-            {
-                System.Diagnostics.Trace.TraceError("In-game host-loss cleanup failed: {0}", error.GetType().Name);
-                lock (gate)
-                    if (ReferenceEquals(pendingRelease, session)) Publish(IngameState.Failed, IngameFailure.Internal, 0, 0, "", false);
-            }
-        });
-    }
-
-    private static async Task DrainAsync<T>(ChannelReader<T> reader, CancellationToken token, Action? onItem = null)
-    {
-        try
-        {
-            await foreach (var _ in reader.ReadAllAsync(token).ConfigureAwait(false))
-                onItem?.Invoke();
-        }
-        catch (Exception) { /* cancelled or completed */ }
-    }
+    private Task GuestPumpAsync(Session session, SessionClient client) => GuestGameplayPumpAsync(session, client);
 
     internal static IngameFailure ClassifyJoinFailure(Exception error, bool sessionCancelled, bool callerCancelled)
     {

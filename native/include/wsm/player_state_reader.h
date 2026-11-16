@@ -65,6 +65,9 @@ public:
     bool initialize(HMODULE module, Il2CppApi api, Il2CppDomain* domain, DWORD native_thread,
                     std::int32_t managed_thread, std::string& error);
     [[nodiscard]] PlayerReadStatus read(SceneStateSnapshot& output, std::string& error) const;
+    // Distinguish a positively stopped run from a merely incomplete scene.
+    // A missing manager is NotReady, never permission to modify runtime code.
+    [[nodiscard]] PlayerReadStatus read_run_state(bool& running, std::string& error) const;
     // Separate opt-in managed-reference inventory: at most 32 equipment entries per actor.
     // Owner slot is -1 for null and -2 for an owner outside the captured MainPlayers.
     // This neither establishes Unity liveness nor proves a weapon hit.

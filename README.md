@@ -43,6 +43,8 @@ pwsh -File tools/verify.ps1
 
 The script builds the projects and runs native, network, launcher and Windows Forms tests. The GUI tests require an interactive Windows desktop. Automated checks cover the tools and libraries; gameplay needs separate testing once the game adapter exists.
 
+The source tree also contains experimental player-input, upgrade-selection and gameplay-transport adapters. They are developer components, not playable multiplayer controls, and are not enabled in the packaged connection preview. See the [native adapter limits](native/README.md#experimental-player-adapters). The checked-in Windows package is not automatically rebuilt when these sources change.
+
 Component documentation:
 
 - [Legacy developer lobby application](src/Wsm.App/README.md)

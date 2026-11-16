@@ -24,6 +24,7 @@ try {
     Invoke-Checked dotnet @('publish', 'src/Wsm.InGame.Runtime/Wsm.InGame.Runtime.csproj', '-c', 'Release', '-r', 'win-x64', '-o', "$root/artifacts/ingame-runtime")
     Invoke-Checked python @("$root/tests/Wsm.InGame.Runtime.Tests/dll/run_dll_tests.py", '--dll', "$root/artifacts/ingame-runtime/Wsm.InGame.Runtime.dll")
     Invoke-Checked python @("$root/tests/Wsm.InGame.Runtime.Tests/dll/lifecycle_test.py", '--dll', "$root/artifacts/ingame-runtime/Wsm.InGame.Runtime.dll")
+    Invoke-Checked python @("$root/tests/Wsm.InGame.Runtime.Tests/dll/gameplay_bridge_test.py", '--dll', "$root/artifacts/ingame-runtime/Wsm.InGame.Runtime.dll")
     Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.Lobby.Tests', '-c', 'Release', '--no-build')
     Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.App.Smoke', '-c', 'Release', '--no-build')
     $windowFixture = "$root/tests/Wsm.OwnedWindowFixture/bin/Release/net10.0-windows/Wsm.OwnedWindowFixture.exe"

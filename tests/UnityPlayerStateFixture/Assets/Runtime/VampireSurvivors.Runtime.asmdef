@@ -1,1 +1,1 @@
-{"name":"VampireSurvivors.Runtime","references":["Unity.Mathematics","PhaserPort","Rewired_Core"]}
+{"name":"VampireSurvivors.Runtime","references":["Unity.Mathematics","PhaserPort","Rewired_Core","UnityEngine.UI"]}

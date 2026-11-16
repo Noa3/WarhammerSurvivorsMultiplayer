@@ -7,6 +7,7 @@ var count = 0;
 var skipped = 0;
 try
 {
+    Run("startup upgrade profile rejects invalid inputs without mutation", () => StartupUpgradeProfileRegression.Run(root));
     Run("play child environment isolates activation and inherited test signals", () =>
     {
         var info = new System.Diagnostics.ProcessStartInfo("unused");
@@ -105,6 +106,7 @@ try
     });
     if (args is [var fixtures] && OperatingSystem.IsWindows())
     {
+        Run("owned startup debugger applies exact code change and cleans failed children", () => StartupDebugRegression.Run(fixtures));
         Run("play rejects logs inside the source without creating them", () =>
         {
             if (!OperatingSystem.IsWindows()) return;

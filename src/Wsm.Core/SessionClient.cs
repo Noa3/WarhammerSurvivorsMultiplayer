@@ -20,6 +20,7 @@ public sealed class SessionClient : IAsyncDisposable
     private readonly object rewardLock = new();
     public ChannelReader<RewardReceipt> Rewards => rewards.Reader;
     public RewardReceipt[] ReceivedRewards { get { lock (rewardLock) return rewardStore.Values.ToArray(); } }
+    public int ReceivedRewardCount { get { lock (rewardLock) return rewardStore.Count; } }
     public ChannelReader<WorldSnapshot> Snapshots => snapshots.Reader;
     private SessionClient(Peer peer, Guid playerId, SessionSettings settings)
     { this.peer = peer; PlayerId = playerId; Settings = settings; Progression = new(playerId); }
@@ -79,6 +80,9 @@ public sealed class SessionClient : IAsyncDisposable
                         if (rewardStore.Count >= 100_000) throw new InvalidDataException("Reward receipt capacity reached.");
                         if (reward.Kind == RewardKind.Xp && !Progression.ApplyXp(reward.ReceiptId, PlayerId, reward.Amount)) throw new InvalidDataException("XP receipt already used outside reward channel.");
                         rewardStore.Add(reward.ReceiptId, reward);
+                        // The ledger records this receipt before notification. A full channel
+                        // still terminates the receive loop; the adapter reconciles the ledger
+                        // on teardown, but cannot promise continued session liveness.
                         if (!rewards.Writer.TryWrite(reward)) throw new InvalidDataException("Reward channel full.");
                     }
                 }

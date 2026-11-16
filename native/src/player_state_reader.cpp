@@ -141,6 +141,32 @@ bool PlayerStateReader::initialize(HMODULE module,Il2CppApi api,Il2CppDomain* do
     if(!p->fx||!p->fy||p->fx==p->fy||!valid(p->fx,"x")||!valid(p->fy,"y")){error="Invalid float2 field metadata";return false;}
     impl_=std::move(p);return true;
 }
+PlayerReadStatus PlayerStateReader::read_run_state(bool& running,std::string& error) const {
+    error.clear();
+    if(!impl_){error="Reader not initialized";return PlayerReadStatus::Error;}
+    const auto& p=*impl_;
+    MainThreadIdentity identity;
+    if(!p.guard.verify(p.os,p.managed,identity,error))return PlayerReadStatus::Error;
+    Impl::Root type(p,p.a.type_get_object(p.a.class_get_type(p.manager)));
+    if(!type.get()){error="Manager type unavailable";return PlayerReadStatus::Error;}
+    void* find_args[]={type.get()};Impl::Root array(p,p.invoke(p.find,nullptr,find_args,error));
+    if(!error.empty())return PlayerReadStatus::Error;
+    if(!array.get()){error="Unable to root manager lookup";return PlayerReadStatus::Error;}
+    auto array_class=p.a.object_get_class(array.get());auto element=p.element_class(array_class);
+    if(!element||(!p.assignable(p.manager,element)&&!p.assignable(element,p.manager))){error="Invalid manager lookup array type";return PlayerReadStatus::Error;}
+    const auto count=p.a.array_length(reinterpret_cast<Il2CppArray*>(array.get()));
+    if(!count)return PlayerReadStatus::NotReady;
+    if(count!=1){error="Ambiguous GameManager instances";return PlayerReadStatus::Error;}
+    std::int32_t zero=0;void* item_args[]={&zero};Impl::Root manager(p,p.invoke(p.array_item,array.get(),item_args,error));
+    if(!error.empty())return PlayerReadStatus::Error;
+    if(!p.is_a(manager.get(),p.manager)){error="Invalid manager instance";return PlayerReadStatus::Error;}
+    std::uint8_t value=0;
+    if(!p.value(p.invoke(p.running,manager.get(),nullptr,error),p.boolclass,value,error))return PlayerReadStatus::Error;
+    if(value>1){error="Invalid run-state Boolean";return PlayerReadStatus::Error;}
+    running=value!=0;
+    return PlayerReadStatus::Captured;
+}
+
 PlayerReadStatus PlayerStateReader::read(SceneStateSnapshot& output,std::string& error) const {
     error.clear();if(!impl_){error="Reader not initialized";return PlayerReadStatus::Error;}const auto& p=*impl_;
     MainThreadIdentity identity;if(!p.guard.verify(p.os,p.managed,identity,error))return PlayerReadStatus::Error;
