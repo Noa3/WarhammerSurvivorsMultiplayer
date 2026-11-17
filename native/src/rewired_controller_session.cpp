@@ -233,6 +233,16 @@ struct RewiredControllerSession::Impl {
     const MethodInfo *get_categories{},*get_layouts{},*category_id{},*category_name{},*layout_id{},*layout_name{},*get_action{},*all_controllers{},*get_maps{},*add_controller{},*remove_controller{},*add_empty_map{},*remove_map{},*create_assignment{},*create_element{},*enable_map{};
     const MethodInfo *map_id{},*map_controller{},*map_controller_id{},*map_type{},*map_category{},*map_layout{},*map_enabled{},*map_bindings{},*action_id{},*element_id{},*element_type{},*axis_range{},*inverted{},*identifier_id{};
     std::string primary_fingerprint;
+    void observe_global_after() {
+        try { owned.global_customs_after=static_cast<std::int32_t>(d.collect(d.invoke(get_customs,controller_helper.get()),custom,32).size()); }
+        catch(const std::exception& e) { owned.global_customs_after=-1; if(owned.observation_error.find("Global custom observation:")==std::string::npos) owned.observation_error += std::string(owned.observation_error.empty()?"":"; ")+"Global custom observation: "+e.what(); }
+    }
+    void observe_primary() {
+        owned.primary_verified=false;
+        try { owned.primary_verified=fingerprint_primary()==primary_fingerprint;
+            if(!owned.primary_verified) owned.observation_error += std::string(owned.observation_error.empty()?"":"; ")+"Primary fingerprint changed";
+        } catch(const std::exception& e) { owned.observation_error += std::string(owned.observation_error.empty()?"":"; ")+"Primary observation: "+e.what(); }
+    }
     void clear_unowned_roots() {
         if(owned.cleanup_required)return;
         primary_roots.clear();actor_roots.clear();actor_inputs.clear();
@@ -299,14 +309,33 @@ struct RewiredControllerSession::Impl {
     }
     int action(const char* label) {Runtime::Root text(d,d.new_string(label));void* args[]={text.get()};auto value=d.scalar<std::int32_t>(d.invoke(get_action,mapping.get(),args),"Int32");if(value<0)throw std::runtime_error("Missing movement action");return value;}
     float axis(Il2CppObject* p,const char* label) {Runtime::Root text(d,d.new_string(label));void* args[]={text.get()};auto value=d.scalar<float>(d.invoke(player_axis,p,args),"Single");if(!std::isfinite(value))throw std::runtime_error("Nonfinite player axis");return value;}
-    RewiredControlEnvironment environment() {
+    RewiredControlEnvironment environment(bool include_sources=false) {
         helpers();RewiredControlEnvironment result;result.horizontal_action_id=action("Move Horizontal");result.vertical_action_id=action("Move Vertical");
         auto categories=d.collect(d.invoke(get_categories,mapping.get()),category,32);auto layouts=d.collect(d.invoke(get_layouts,mapping.get()),layout,32);
         std::set<int> ids;for(auto& row:categories){auto id=d.integer(category_id,row.get());if(id<0||!ids.insert(id).second)throw std::runtime_error("Invalid or duplicate category");result.categories.push_back({id,d.text(d.invoke(category_name,row.get()))});}
         ids.clear();for(auto& row:layouts){auto id=d.integer(layout_id,row.get());if(id<0||!ids.insert(id).second)throw std::runtime_error("Invalid or duplicate layout");result.layouts.push_back({id,d.text(d.invoke(layout_name,row.get()))});}
-        for(int id=0;id<2;++id){auto p=get_player_ref(id);RewiredPlayerInputState s;s.player_id=id;s.horizontal=axis(p.get(),"Move Horizontal");s.vertical=axis(p.get(),"Move Vertical");auto controls=controllers_for(p.get());
-            for(auto& c:controls){auto maps=maps_for(p.get(),c.get());for(auto& m:maps){Runtime::Root owner(d,d.invoke(map_controller,m.get()));if(owner.get()!=c.get())throw std::runtime_error("Map/controller reference mismatch");s.maps.push_back(map_state(m.get()));if(s.maps.size()>32)throw std::runtime_error("Player map count exceeds 32");}}
+        for(int id=0;id<2;++id){auto p=get_player_ref(id);RewiredPlayerInputState s;s.player_id=id;s.horizontal=axis(p.get(),"Move Horizontal");s.vertical=axis(p.get(),"Move Vertical");auto controls=controllers_for(p.get());std::set<int> custom_ids;
+            for(auto& c:controls){
+                RewiredAssignedCustomSource source; bool is_custom=false;
+                if(include_sources){
+                    const auto kind=enumeration(get_type,c.get(),"ControllerType");
+                    is_custom=d.assignable(custom,d.a.object_get_class(c.get()));
+                    if((kind!=0&&kind!=1&&kind!=2&&kind!=20)||(kind==20)!=is_custom)throw std::runtime_error("Invalid controller kind or custom type mismatch");
+                    if(is_custom){
+                        source.controller_id=d.field_integer(controller_id_field,c.get());source.source_id=d.integer(get_source,c.get());
+                        if(source.controller_id<0||source.source_id<0||!custom_ids.insert(source.controller_id).second)throw std::runtime_error("Invalid or duplicate custom controller identity");
+                        auto identifiers=d.collect(d.invoke(axis_ids,c.get()),identifier,32);std::set<int> axes;
+                        for(auto& item:identifiers){auto axis_id=d.integer(identifier_id,item.get());if(axis_id<0||!axes.insert(axis_id).second)throw std::runtime_error("Invalid or duplicate custom axis");source.axis_ids.push_back(axis_id);}
+                    }
+                }
+                auto maps=maps_for(p.get(),c.get());std::set<int> map_ids;
+                for(auto& m:maps){Runtime::Root owner(d,d.invoke(map_controller,m.get()));if(owner.get()!=c.get())throw std::runtime_error("Map/controller reference mismatch");auto state=map_state(m.get());
+                    if(include_sources&&is_custom){if(state.controller_id!=source.controller_id||state.controller_type!=20||!map_ids.insert(state.id).second)throw std::runtime_error("Invalid or duplicate custom map identity");source.map_ids.push_back(state.id);}
+                    s.maps.push_back(std::move(state));if(s.maps.size()>32)throw std::runtime_error("Player map count exceeds 32");}
+                if(is_custom)s.custom_sources.push_back(std::move(source));
+            }
             result.players.push_back(std::move(s));}
+        result.custom_sources_captured=include_sources;
         return result;
     }
     std::string fingerprint_primary(bool remember=false) {
@@ -335,6 +364,7 @@ struct RewiredControllerSession::Impl {
     bool close(std::string& error) {
         try {
             verify();if(!owned.cleanup_required){clear_unowned_roots();return true;}
+            if(owned.factory_outcome_unknown) { observe_global_after(); throw std::runtime_error("Factory outcome unknown; retain ownership without deleting unproven resources"); }
             if(!controller.get())throw std::runtime_error("Owned controller root lost");
             // Removal of this map/controller is an independent neutralization path
             // if the value setter is failing or the run has already stopped.
@@ -379,7 +409,15 @@ struct RewiredControllerSession::Impl {
             auto global=d.collect(d.invoke(get_customs,controller_helper.get()),custom,32);
             if(std::any_of(global.begin(),global.end(),[&](auto& c){return c.get()==controller.get();})){void* args[]={controller.get()};if(!d.boolean(destroy_controller,controller_helper.get(),args))throw std::runtime_error("Owned controller destruction refused");}
             global=d.collect(d.invoke(get_customs,controller_helper.get()),custom,32);if(std::any_of(global.begin(),global.end(),[&](auto& c){return c.get()==controller.get();}))throw std::runtime_error("Owned controller still registered after destruction");
-            controller.reset();map.reset();owned={};clear_unowned_roots();error.clear();return true;
+            for(int id=0;id<4;++id) { void* args[]={&owned.controller_id,&id}; if(d.boolean(assigned,controller_helper.get(),args))throw std::runtime_error("Owned controller assignment still present"); }
+            owned.release_verified=true;
+            observe_primary();
+            owned.global_customs_after=static_cast<std::int32_t>(global.size());
+            controller.reset();map.reset();
+            owned.player_id=owned.controller_id=owned.map_id=-1;
+            owned.controller_created=owned.controller_attached=owned.map_registered=owned.cleanup_required=false;
+            owned.horizontal=owned.vertical=0;
+            clear_unowned_roots();error.clear();return true;
         }catch(const std::exception& e){error=e.what();return false;}
     }
 };
@@ -389,9 +427,10 @@ bool RewiredControllerSession::initialize(HMODULE module,Il2CppApi api,Il2CppDom
     error.clear();if(impl_&&impl_->owned.cleanup_required){error="Cannot replace a live owned controller session";return false;}
     try{if(!module||!domain||!os||!api.thread_current||!api.thread_current()||!api.runtime_invoke||!api.object_get_class||!api.object_unbox||!api.domain_get_assemblies||!api.class_get_methods)throw std::runtime_error("Incomplete attached runtime API");auto p=std::make_unique<Impl>();p->d.module=module;p->d.a=api;p->d.domain=domain;p->os=os;p->managed=managed;p->bind();impl_=std::move(p);return true;}catch(const std::exception& e){error=e.what();return false;}}
 PlayerReadStatus RewiredControllerSession::inspect(RewiredControlEnvironment& output,std::string& error){error.clear();bool verified=false;try{if(!impl_)throw std::runtime_error("Controller session not initialized");impl_->verify();verified=true;if(!impl_->d.boolean(impl_->ready)){impl_->clear_unowned_roots();return PlayerReadStatus::NotReady;}auto result=impl_->environment();impl_->clear_unowned_roots();output=std::move(result);return PlayerReadStatus::Captured;}catch(const std::exception& e){if(verified)impl_->clear_unowned_roots();error=e.what();return PlayerReadStatus::Error;}}
+PlayerReadStatus RewiredControllerSession::inspect_sources(RewiredControlEnvironment& output,std::string& error){error.clear();bool verified=false;try{if(!impl_)throw std::runtime_error("Controller session not initialized");impl_->verify();verified=true;if(!impl_->d.boolean(impl_->ready)){impl_->clear_unowned_roots();return PlayerReadStatus::NotReady;}auto result=impl_->environment(true);impl_->clear_unowned_roots();output=std::move(result);return PlayerReadStatus::Captured;}catch(const std::exception& e){if(verified)impl_->clear_unowned_roots();error=e.what();return PlayerReadStatus::Error;}}
 bool RewiredControllerSession::open(const RewiredControlOptions& options,std::string& error){
     error.clear();if(!impl_){error="Controller session not initialized";return false;}auto& p=*impl_;
-    bool created_here=false,verified=false;
+    bool created_here=false,verified=false,factory_attempted=false;
     try {
         p.verify();verified=true;if(p.owned.cleanup_required)throw std::runtime_error("Owned controller already active");
         if(options.player_id!=1||options.source_id<0||options.category_id<0||options.layout_id<0||options.horizontal_axis_id<0||options.vertical_axis_id<0||options.horizontal_axis_id==options.vertical_axis_id)throw std::runtime_error("Invalid second-player control options");
@@ -402,9 +441,15 @@ bool RewiredControllerSession::open(const RewiredControlOptions& options,std::st
         if(std::none_of(env.categories.begin(),env.categories.end(),[&](auto& c){return c.id==options.category_id;})||std::none_of(env.layouts.begin(),env.layouts.end(),[&](auto& l){return l.id==options.layout_id;}))throw std::runtime_error("Unknown live category or layout");
         bool h=false,v=false;for(auto& m:env.players[0].maps)if(m.enabled&&m.category_id==options.category_id)for(auto& b:m.bindings){h|=b.action_id==env.horizontal_action_id;v|=b.action_id==env.vertical_action_id;}if(!h||!v)throw std::runtime_error("Category is not an enabled existing movement category");
         p.options=options;p.primary_fingerprint=p.fingerprint_primary(true);auto before=p.d.collect(p.d.invoke(p.get_customs,p.controller_helper.get()),p.custom,32);
-        Runtime::Root tag(p.d,p.d.new_string("WSM.OwnedRemote.v1"));auto source=options.source_id;void* create_args[]={&source,tag.get()};Runtime::Root fresh(p.d,p.d.invoke(p.create_controller,p.controller_helper.get(),create_args));p.d.require(fresh.get(),p.custom);
+        Runtime::Root tag(p.d,p.d.new_string("WSM.OwnedRemote.v1"));auto source=options.source_id;void* create_args[]={&source,tag.get()};
+        // Invocation itself may register a controller before throwing. A list
+        // delta cannot prove who owns a newly observed object.
+        p.owned={};p.owned.global_customs_before=static_cast<std::int32_t>(before.size());
+        p.owned.cleanup_required=true;p.owned.factory_outcome_unknown=true;factory_attempted=true;
+        Runtime::Root fresh(p.d,p.d.invoke(p.create_controller,p.controller_helper.get(),create_args));p.d.require(fresh.get(),p.custom);
         if(std::any_of(before.begin(),before.end(),[&](auto& c){return c.get()==fresh.get();}))throw std::runtime_error("Factory returned a preexisting controller");
-        p.controller=std::move(fresh);created_here=true;p.owned.cleanup_required=p.owned.controller_created=true;p.owned.player_id=1;p.owned.controller_id=p.d.field_integer(p.controller_id_field,p.controller.get());
+        p.controller=std::move(fresh);created_here=true;p.owned.factory_outcome_unknown=false;p.owned.controller_created=true;p.owned.player_id=1;p.owned.controller_id=p.d.field_integer(p.controller_id_field,p.controller.get());
+        p.owned.last_controller_id=p.owned.controller_id;p.observe_global_after();
         if(p.owned.controller_id<0||p.d.integer(p.get_source,p.controller.get())!=source)throw std::runtime_error("Created controller identity/source mismatch");
         if(std::any_of(before.begin(),before.end(),[&](auto& c){return p.d.field_integer(p.controller_id_field,c.get())==p.owned.controller_id;}))throw std::runtime_error("Factory reused a registered custom controller ID");
         auto identifiers=p.d.collect(p.d.invoke(p.axis_ids,p.controller.get()),p.identifier,32);std::set<int> axes;for(auto& i:identifiers){auto id=p.d.integer(p.identifier_id,i.get());if(id<0||!axes.insert(id).second)throw std::runtime_error("Invalid actual axis identifiers");}if(!axes.count(options.horizontal_axis_id)||!axes.count(options.vertical_axis_id))throw std::runtime_error("Created controller lacks requested axes");
@@ -426,14 +471,15 @@ bool RewiredControllerSession::open(const RewiredControlOptions& options,std::st
         if(registered.size()!=1||!p.map.get())throw std::runtime_error("Owned empty-map registration is not unique");
         Runtime::Root map_owner(p.d,p.d.invoke(p.map_controller,p.map.get()));auto ms=p.map_state(p.map.get());
         if(map_owner.get()!=p.controller.get()||ms.controller_id!=p.owned.controller_id||ms.controller_type!=20||ms.category_id!=cat||ms.layout_id!=layout||!ms.bindings.empty())throw std::runtime_error("Registered map is not an empty owned custom map");
-        p.owned.map_id=ms.id;
+        p.owned.map_id=ms.id;p.owned.last_map_id=ms.id;
         for(int axis=0;axis<2;++axis){auto element=axis?options.vertical_axis_id:options.horizontal_axis_id;auto action=axis?env.vertical_action_id:env.horizontal_action_id;std::uint8_t invert=0;void* args[]={&element,&action,&invert};Runtime::Root value(p.d,p.d.invoke(p.create_assignment,nullptr,args));if(!value.get()||p.d.a.object_get_class(value.get())!=p.assignment||!p.d.a.object_unbox(value.get()))throw std::runtime_error("Invalid boxed full-axis assignment");void* binding_args[]={p.d.a.object_unbox(value.get())};if(!p.d.boolean(p.create_element,p.map.get(),binding_args))throw std::runtime_error("Full-axis map creation refused");}
         std::uint8_t enabled=1;void* enable_args[]={&enabled};p.d.invoke(p.enable_map,p.map.get(),enable_args);
         ms=p.map_state(p.map.get());
         if(!ms.enabled||ms.bindings.size()!=2)throw std::runtime_error("Owned map is disabled or has wrong bindings");
         for(int axis=0;axis<2;++axis){auto action=axis?env.vertical_action_id:env.horizontal_action_id;auto element=axis?options.vertical_axis_id:options.horizontal_axis_id;if(std::count_if(ms.bindings.begin(),ms.bindings.end(),[&](auto& b){return b.action_id==action&&b.element_id==element&&b.element_type==0&&b.axis_range==0&&!b.inverted;})!=1)throw std::runtime_error("Registered action/axis binding mismatch");}
-        void* assigned_args[]={&p.owned.controller_id,&p.owned.player_id};if(!p.d.boolean(p.assigned,p.controller_helper.get(),assigned_args)||p.fingerprint_primary()!=p.primary_fingerprint)throw std::runtime_error("Target assignment or primary isolation failed");p.owned.map_registered=true;return true;
-    }catch(const std::exception& e){error=e.what();if(created_here&&p.owned.cleanup_required){std::string cleanup;if(!p.close(cleanup))error+="; retained cleanup failure: "+cleanup;}if(verified)p.clear_unowned_roots();return false;}}
+        void* assigned_args[]={&p.owned.controller_id,&p.owned.player_id};if(!p.d.boolean(p.assigned,p.controller_helper.get(),assigned_args))throw std::runtime_error("Target assignment or primary isolation failed");
+        p.observe_primary();if(!p.owned.primary_verified)throw std::runtime_error("Target assignment or primary isolation failed");p.owned.map_registered=true;return true;
+    }catch(const std::exception& e){error=e.what();if(factory_attempted&&p.owned.factory_outcome_unknown)p.observe_global_after();if(created_here&&p.owned.cleanup_required){std::string cleanup;if(!p.close(cleanup))error+="; retained cleanup failure: "+cleanup;}if(verified)p.clear_unowned_roots();return false;}}
 bool RewiredControllerSession::set_axes(float x,float y,std::string& error){error.clear();if(!impl_){error="Controller session not initialized";return false;}auto& p=*impl_;try{p.verify();if(!std::isfinite(x)||!std::isfinite(y)||std::abs(x)>1||std::abs(y)>1)throw std::runtime_error("Invalid control vector");if(!p.owned.map_registered||!p.owned.controller_attached)throw std::runtime_error("No registered owned control");if(x!=0||y!=0){p.actor_identity();if(p.fingerprint_primary()!=p.primary_fingerprint)throw std::runtime_error("Primary resources changed during owned control");auto maps=p.maps_for(p.input_player.get(),p.controller.get());if(maps.size()!=1||maps[0].get()!=p.map.get()||!p.d.boolean(p.map_enabled,p.map.get()))throw std::runtime_error("Owned map no longer enabled/registered");}p.write(x,y);if(x==0&&y==0&&(p.owned.horizontal!=0||p.owned.vertical!=0))throw std::runtime_error("Owned neutral readback not yet zero");return true;}catch(const std::exception& e){error=e.what();return false;}}
 bool RewiredControllerSession::close(std::string& error){error.clear();return !impl_||impl_->close(error);}
 RewiredOwnedControlState RewiredControllerSession::state() const{return impl_?impl_->owned:RewiredOwnedControlState{};}

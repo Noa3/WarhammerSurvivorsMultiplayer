@@ -24,7 +24,12 @@ EXPECTED_CASES = {
     "drive_dead_actor_independent_controller_cleanup", "drive_dead_actor_removes_subscription",
     "drive_final_resources_and_primary", "drive_mismatched_window_refused_before_acquisition",
     "drive_mismatched_native_thread_refused_before_acquisition", "drive_mismatched_managed_thread_refused_before_acquisition",
-    "drive_stop_before_client_start_completes_without_resources"
+    "drive_stop_before_client_start_completes_without_resources", "drive_zero_start",
+    "drive_zero_rejects_nonzero_lease", "drive_zero_no_nonzero_attempts",
+    "drive_zero_live_cached_resource_on_worker", "drive_zero_rejects_zero_lease",
+    "drive_zero_recovery_deadline_closes_without_input", "drive_zero_closed_cached_resource_on_worker",
+    "drive_zero_duration_zero_refused_before_acquisition", "drive_zero_duration_over_limit_refused_before_acquisition",
+    "drive_zero_start_before_owner_drop", "drive_zero_failed_cleanup_cached_after_owner_drop", "drive_zero_retry_after_owner_drop"
 }
 
 

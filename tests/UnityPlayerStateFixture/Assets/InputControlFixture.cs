@@ -38,6 +38,41 @@ public static class InputControlFixture
         originalMap.CreateElementMap(Rewired.ElementAssignment.FullAxisAssignment(9, 103, false));
         primary.controllers.maps.AddMap(keyboard, originalMap, true);
         Check("control_environment", 0);
+        Check("control_source_observed_empty",30);
+        var sourceA=new Rewired.CustomController(901,7,new[] {2,9});
+        var sourceB=new Rewired.CustomController(902,7,new[] {9,2});
+        primary.controllers.AddController(sourceA,false); primary.controllers.AddController(sourceB,false);
+        var sourceMap=new Rewired.ControllerMap(sourceA,17,23);
+        primary.controllers.maps.AddMap(sourceA,sourceMap,false);
+        var reads=Rewired.CustomController.SourceReads;
+        Check("control_source_inventory",21);
+        report("control_source_getter_called",Rewired.CustomController.SourceReads==reads+2?0:126);
+        Rewired.CustomController.FailSource=true;
+        try {
+            reads=Rewired.CustomController.SourceReads;
+            Check("control_default_inspect_ignores_source_throw",23);
+            report("control_default_inspect_no_source_reads",Rewired.CustomController.SourceReads==reads?0:127);
+            Check("control_source_throw_atomic",22);
+        } finally { Rewired.CustomController.FailSource=false; }
+        sourceB.FixtureIdentifiers(9,9);
+        try { Check("control_source_duplicate_axis_atomic",24); } finally { sourceB.FixtureIdentifiers(9,2); }
+        sourceB.FixtureIdentifiers(-1,2);
+        try { Check("control_source_negative_axis_atomic",25); } finally { sourceB.FixtureIdentifiers(9,2); }
+        sourceMap.fixtureOwnerOverride=keyboard;
+        try { Check("control_source_map_owner_atomic",26); } finally { sourceMap.fixtureOwnerOverride=null; }
+        var badSource=new Rewired.CustomController(903,-1,new[] {2,9}); primary.controllers.AddController(badSource,false);
+        try { Check("control_source_negative_id_atomic",27); } finally { primary.controllers.RemoveController(badSource); }
+        var duplicate=new Rewired.CustomController(902,7,new[] {2,9}); primary.controllers.AddController(duplicate,false);
+        try { Check("control_source_duplicate_controller_atomic",28); } finally { primary.controllers.RemoveController(duplicate); }
+        var duplicateMap=new Rewired.ControllerMap(sourceA,17,23) { fixtureIdOverride=sourceMap.id };
+        primary.controllers.maps.AddMap(sourceA,duplicateMap,false);
+        try { Check("control_source_duplicate_map_atomic",29); } finally { primary.controllers.maps.GetMaps(sourceA).Remove(duplicateMap); }
+        var badKind=new Rewired.Controller(904,Rewired.ControllerType.Custom); primary.controllers.AddController(badKind,false);
+        try { Check("control_source_kind_mismatch_atomic",31); } finally { primary.controllers.RemoveController(badKind); }
+        report("control_source_no_mutation",primary.controllers.ContainsController(sourceA)&&primary.controllers.ContainsController(sourceB)&&
+            primary.controllers.maps.GetMaps(sourceA).Count==1&&ReferenceEquals(primary.controllers.maps.GetMaps(sourceA)[0],sourceMap)&&
+            !sourceMap.enabled&&primary.controllers.maps.GetMaps(sourceB).Count==0&&Rewired.ReInput.controllerHelper.values.Count==0?0:128);
+        primary.controllers.maps.GetMaps(sourceA).Clear(); primary.controllers.RemoveController(sourceA); primary.controllers.RemoveController(sourceB);
         Check("control_refuse_primary", 5);
         Check("control_refuse_source", 6);
         Check("control_refuse_category", 7);
@@ -111,6 +146,27 @@ public static class InputControlFixture
             remote.controllers.ContainsController(owned)&&Rewired.ReInput.controllerHelper.values.Count==1?0:101);
         if(owned!=null&&foreignMap!=null)remote.controllers.maps.GetMaps(owned).Remove(foreignMap);
         Check("control_close_after_foreign_map_removed",4);
+        Check("control_open_before_primary_change",1);
+        originalMap.enabled=false;
+        try { Check("control_close_primary_changed_release_proven",19); }
+        finally { originalMap.enabled=true; }
+        Check("control_open_before_primary_query_failure",1);
+        originalMap.fixtureFailEnabledRead=true;
+        try { Check("control_close_primary_query_failure_release_proven",19); }
+        finally { originalMap.fixtureFailEnabledRead=false; }
+        var foreign = new Rewired.CustomController(9000, 7, new[] { 2, 9 });
+        Rewired.ReInput.controllerHelper.values.Add(foreign);
+        Rewired.ReInput.ControllerHelper.FailAfterCreate=true;
+        try { Check("control_factory_register_then_throw_retains_ownership",18); }
+        finally { Rewired.ReInput.ControllerHelper.FailAfterCreate=false; }
+        report("control_factory_ambiguous_preserves_global",Rewired.ReInput.controllerHelper.values.Count==2 &&
+            ReferenceEquals(Rewired.ReInput.controllerHelper.values[0],foreign)?0:108);
+        Rewired.ReInput.ControllerHelper.FailAfterCreate=true;
+        Rewired.ReInput.ControllerHelper.FailGetAfterCreate=true;
+        try { Check("control_factory_throw_global_query_failure_retains_ownership",20); }
+        finally { Rewired.ReInput.ControllerHelper.FailAfterCreate=false; Rewired.ReInput.ControllerHelper.FailGetAfterCreate=false; Rewired.ReInput.ControllerHelper.FailGet=false; }
+        report("control_factory_query_failure_preserves_foreign",Rewired.ReInput.controllerHelper.values.Count==3 &&
+            ReferenceEquals(Rewired.ReInput.controllerHelper.values[0],foreign)?0:115);
         UnityEngine.Object.DestroyImmediate(input.gameObject);
     }
 }

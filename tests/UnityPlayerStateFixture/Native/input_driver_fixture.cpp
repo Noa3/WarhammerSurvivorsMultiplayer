@@ -48,6 +48,9 @@ extern "C" __declspec(dllexport) int __cdecl fixture_drive_start(int managed, un
     if (mode == 2) config.window = GetDesktopWindow();
     if (mode == 3) ++config.native_thread;
     if (mode == 4) ++config.managed_thread;
+    if (mode == 5) { config.zero_only = true; config.zero_only_max_ms = 1000; }
+    if (mode == 9) { config.zero_only = true; config.zero_only_max_ms = 15000; }
+    if (mode == 7 || mode == 8) { config.zero_only = true; config.zero_only_max_ms = mode == 7 ? 0 : 30001; }
     if (mode == 6) current->pump->test_fail_start(5);
     auto client = std::make_unique<wsm::RewiredInputClient>(config);
     current->mailbox = client->mailbox();
@@ -89,3 +92,18 @@ extern "C" __declspec(dllexport) unsigned long long __cdecl fixture_drive_read(i
     }
 }
 extern "C" __declspec(dllexport) const char* __cdecl fixture_drive_reason() { return reason.c_str(); }
+// Read only the cached data from an unrelated worker, never call the session here.
+extern "C" __declspec(dllexport) unsigned long long __cdecl fixture_drive_resource(int field) {
+    if (!current || !current->mailbox) return 0;
+    wsm::RewiredInputResourceState snapshot;
+    std::thread worker([&] { snapshot = current->mailbox->resource_state(); });
+    worker.join();
+    switch (field) {
+    case 0: return snapshot.captured;
+    case 1: return snapshot.owned.controller_created;
+    case 2: return snapshot.owned.controller_attached;
+    case 3: return snapshot.owned.map_registered;
+    case 4: return snapshot.owned.cleanup_required;
+    default: return 0;
+    }
+}

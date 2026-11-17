@@ -98,3 +98,20 @@ assert profiles[0]['inputProfile'] == {
 }
 assert profiles[0]['equipment'] == {'state': 'not_requested', 'actors': []}
 print('PASS actual native input profile JSON: typed source/axis/action IDs, valid empty axes and opt-in boundaries')
+sources = [json.loads(s.removeprefix('ROSTER_CUSTOM_SOURCES_JSON ')) for s in result.stdout.splitlines()
+           if s.startswith('ROSTER_CUSTOM_SOURCES_JSON ')]
+assert len(sources) == 1 and sources[0]['action'] == 'controlSources'
+assert sources[0]['controlEnvironment']['customSourcesCaptured'] is True
+assert sources[0]['controlEnvironment']['players'][0]['customSources'] == [
+    {'controllerId': 400, 'sourceId': 7, 'axisIds': [2, 9], 'mapIds': [401]},
+    {'controllerId': 402, 'sourceId': 11, 'axisIds': [], 'mapIds': []},
+]
+assert sources[0]['controlEnvironment']['players'][0]['maps'][0]['controllerId'] == 400
+admissions = [json.loads(s.removeprefix('ROSTER_ZERO_ADMISSION_JSON ')) for s in result.stdout.splitlines()
+              if s.startswith('ROSTER_ZERO_ADMISSION_JSON ')]
+assert len(admissions) == 1 and admissions[0]['action'] == 'inputZeroStart'
+assert admissions[0]['inputProfile']['state'] == admissions[0]['controlEnvironment']['state'] == 'captured'
+assert admissions[0]['inputProfile']['definitions'] == profiles[0]['inputProfile']['definitions']
+assert 'customSourcesCaptured' not in admissions[0]['controlEnvironment']
+assert admissions[0]['inputZero']['stateCaptured'] is False
+print('PASS actual native custom-source and zero-admission JSON: distinct IDs, mapped/unmapped sources and observed catalogs')

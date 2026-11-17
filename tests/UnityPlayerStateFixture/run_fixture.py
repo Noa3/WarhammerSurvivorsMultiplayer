@@ -63,6 +63,15 @@ EXPECTED_CASES.update({"camera_open_own", "camera_own_effect", "camera_own_updat
     "camera_wrong_thread", "camera_not_normal_refused", "camera_null_target_refused"})
 EXPECTED_CASES.update({"camera_late_delegate_isolated", "camera_destroyed_manager_recovers", "camera_non_normal_restores_stock", "camera_replaced_manager_inactive"})
 EXPECTED_CASES.update({"camera_foreign_callback_generation_reset"})
+EXPECTED_CASES.update({"control_open_before_primary_change", "control_close_primary_changed_release_proven",
+    "control_open_before_primary_query_failure", "control_close_primary_query_failure_release_proven",
+    "control_factory_register_then_throw_retains_ownership", "control_factory_ambiguous_preserves_global",
+    "control_factory_throw_global_query_failure_retains_ownership", "control_factory_query_failure_preserves_foreign"})
+EXPECTED_CASES.update({"control_source_inventory", "control_source_getter_called", "control_default_inspect_ignores_source_throw",
+    "control_default_inspect_no_source_reads", "control_source_throw_atomic", "control_source_duplicate_axis_atomic",
+    "control_source_negative_axis_atomic", "control_source_map_owner_atomic", "control_source_no_mutation",
+    "control_source_observed_empty", "control_source_negative_id_atomic", "control_source_duplicate_controller_atomic", "control_source_duplicate_map_atomic",
+    "control_source_kind_mismatch_atomic"})
 root=os.path.abspath(os.path.join(os.path.dirname(__file__),"..",".."))
 local=os.path.join(root,".local")
 player=os.environ.get("WSM_PLAYER_STATE_PLAYER","player-state-v1-player4")

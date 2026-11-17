@@ -1,5 +1,6 @@
 // Execute the production parser/serializer/writer without a game or runtime.
 #include "../../native/src/coop_roster_probe.cpp"
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -115,9 +116,21 @@ int main(int argc, char** argv) {
     check("extended upgrade permission refused",SetEnvironmentVariableW(L"WSM_UPGRADE_PASS_HOOK_OPT_IN",L"1 ")&&!upgrade_hook_opt_in());
     check("restore process-local test flag",SetEnvironmentVariableW(L"WSM_UPGRADE_PASS_HOOK_OPT_IN",previous_hook_length?previous_hook_flag:nullptr)!=FALSE);
     check("inspect command", parse_command("inspect\r\n", 1234, command) && command.action == RosterAction::inspect);
+    check("assigned custom source discovery route", parse_command("controlSources:1234", 1234, command));
+    check("zero-only explicit source route preserves definition ID", parse_command("inputZeroStart:1234:7", 1234, command) && command.control.source_id == 7);
+    check("zero-only explicit source accepts actual definition zero", parse_command("inputZeroStart:1234:0", 1234, command) && command.control.source_id == 0);
+    for (const auto* bad : {"controlSources:1235", "controlSources:1234:0", "inputZeroStart:1235:7", "inputZeroStart:1234:",
+                           "inputZeroStart:1234:-1", "inputZeroStart:1234:-0", "inputZeroStart:1234:+1", "inputZeroStart:1234:2147483648",
+                           "inputZeroStart:1234:7:8", "inputZeroStart:1234: 7", "inputZeroStart:1234:7x"})
+        check("source discovery and explicit source refuse malformed or foreign identity", !parse_command(bad, 1234, command));
     check("neutral input watch start route", parse_command("inputWatchStart:1234", 1234, command));
     check("neutral input watch state route", parse_command("inputWatchState:1234", 1234, command));
     check("neutral input watch stop route", parse_command("inputWatchStop:1234", 1234, command));
+    check("zero-only controller start route", parse_command("inputZeroStart:1234", 1234, command) && command.control.source_id == -1);
+    check("zero-only controller state route", parse_command("inputZeroState:1234", 1234, command));
+    check("zero-only controller stop route", parse_command("inputZeroStop:1234", 1234, command));
+    for (const auto* bad : {"inputZeroStart:1235", "inputZeroStart:1234:0.5:0", "inputZeroSubmit:1234", "inputZeroState:1234:extra", "inputZeroStop:-1234"})
+        check("zero-only controller refuses input/foreign identity", !parse_command(bad, 1234, command));
     for (const auto* bad : {"inputWatchStart:1235", "inputWatchState:1234:extra", "inputWatchStop:-1234", "inputWatchStart:1234\ninspect"})
         check("neutral input watch refuses malformed identity", !parse_command(bad, 1234, command));
     {
@@ -150,6 +163,156 @@ int main(int argc, char** argv) {
         view.input_watch_captured = false;
         check("input watch unavailable suppresses stale counters", result_json(view, 2).find("inputUpdates") == std::string::npos);
         check("restore input-watch permission", SetEnvironmentVariableW(L"WSM_INPUT_PUMP_OBSERVATION_OPT_IN", length ? previous : nullptr) != FALSE);
+    }
+    {
+        wchar_t previous[128]{};
+        const DWORD length = GetEnvironmentVariableW(L"WSM_INPUT_ZERO_TRIAL_OPT_IN", previous, 128);
+        if (length >= 128) return 1;
+        for (const auto* flag : {static_cast<const wchar_t*>(nullptr), L"true", L"01", L"1 "}) {
+            check("set nonexact zero-only permission", SetEnvironmentVariableW(L"WSM_INPUT_ZERO_TRIAL_OPT_IN", flag) != FALSE);
+            ProbeContext denied; denied.command.action = RosterAction::input_zero_start;
+            execute_command(&denied);
+            check("zero-only start refuses before runtime acquisition", !denied.action_succeeded && !denied.input_pump && !denied.zero_mailbox &&
+                  denied.action_error == "Zero-only controller trial requires separate WSM_INPUT_ZERO_TRIAL_OPT_IN=1");
+        }
+        check("exact zero-only permission", SetEnvironmentVariableW(L"WSM_INPUT_ZERO_TRIAL_OPT_IN", L"1") && input_zero_opt_in());
+        ProbeContext guard; guard.command.action = RosterAction::input_zero_start;
+        execute_command(&guard);
+        check("zero-only start cannot bypass main-thread proof", !guard.action_succeeded && !guard.input_pump && !guard.zero_mailbox && guard.action_error == "Native OS thread mismatch.");
+        check("restore zero-only permission", SetEnvironmentVariableW(L"WSM_INPUT_ZERO_TRIAL_OPT_IN", length ? previous : nullptr) != FALSE);
+    }
+    {
+        RewiredInputProfileSnapshot profile;
+        profile.horizontal_action_id = 101; profile.vertical_action_id = 103;
+        profile.definitions.push_back({55, {17, 23}});
+        RewiredControlEnvironment env;
+        env.horizontal_action_id = 101; env.vertical_action_id = 103;
+        env.categories.push_back({32, "movement"}); env.layouts.push_back({37, "custom"});
+        RewiredPlayerInputState primary; primary.player_id = 0;
+        RewiredMapState map; map.enabled = true; map.category_id = 32;
+        RewiredActionBinding horizontal; horizontal.action_id = 101;
+        RewiredActionBinding vertical; vertical.action_id = 103;
+        map.bindings = {horizontal, vertical}; primary.maps.push_back(map); env.players.push_back(primary);
+        RewiredControlOptions selected; std::string error;
+        check("zero options propagate only actual live IDs", select_zero_options(profile, env, selected, error) && error.empty() &&
+              selected.player_id == 1 && selected.source_id == 55 && selected.horizontal_axis_id == 17 && selected.vertical_axis_id == 23 && selected.category_id == 32 && selected.layout_id == 37);
+        const auto valid = selected;
+        auto missing = profile; missing.definitions.clear();
+        check("zero options refuse missing source without overwriting selection", !select_zero_options(missing, env, selected, error) && selected.source_id == valid.source_id);
+        auto ambiguous = profile; ambiguous.definitions.push_back({56, {41, 43}});
+        check("zero options refuse ambiguous sources", !select_zero_options(ambiguous, env, selected, error));
+        check("explicit zero source selects only the chosen live definition", select_zero_options(ambiguous, env, selected, error, 56) &&
+              selected.source_id == 56 && selected.horizontal_axis_id == 41 && selected.vertical_axis_id == 43);
+        const auto explicitly_selected = selected;
+        std::reverse(ambiguous.definitions.begin(), ambiguous.definitions.end());
+        check("explicit zero source is independent of catalog enumeration order", select_zero_options(ambiguous, env, selected, error, 56) &&
+              selected.source_id == 56 && selected.horizontal_axis_id == 41);
+        check("explicit absent source never falls back or overwrites previous selection", !select_zero_options(ambiguous, env, selected, error, 99) &&
+              selected.source_id == explicitly_selected.source_id && selected.horizontal_axis_id == explicitly_selected.horizontal_axis_id);
+        auto duplicated_source = ambiguous; duplicated_source.definitions.push_back({56, {71, 73}});
+        check("explicit duplicate source refuses before selection", !select_zero_options(duplicated_source, env, selected, error, 56));
+        auto unsuitable_source = ambiguous; unsuitable_source.definitions[0].axis_ids = {41, 41};
+        check("explicit unsuitable source never substitutes another eligible definition", !select_zero_options(unsuitable_source, env, selected, error, 56));
+        check("explicit source rejects invalid direct negative values", !select_zero_options(profile, env, selected, error, -2));
+        auto changed_actions = env; changed_actions.vertical_action_id = 104;
+        check("explicit source cannot bypass action identity", !select_zero_options(ambiguous, changed_actions, selected, error, 56));
+        auto changed_category = env; changed_category.players[0].maps[0].enabled = false;
+        check("explicit source cannot bypass primary movement category", !select_zero_options(ambiguous, changed_category, selected, error, 56));
+        auto changed_layout = env; changed_layout.layouts.push_back({38, "other"});
+        check("explicit source cannot bypass layout ambiguity", !select_zero_options(ambiguous, changed_layout, selected, error, 56));
+        auto source_zero = profile; source_zero.definitions.push_back({0, {71, 73}});
+        check("explicit definition zero is not confused with automatic selection", select_zero_options(source_zero, env, selected, error, 0) && selected.source_id == 0);
+        auto duplicate_axes = profile; duplicate_axes.definitions[0].axis_ids = {17, 17};
+        check("zero options refuse repeated axis IDs", !select_zero_options(duplicate_axes, env, selected, error));
+        auto mismatched = profile; mismatched.vertical_action_id = 104;
+        check("zero options refuse inconsistent action metadata", !select_zero_options(mismatched, env, selected, error));
+        auto disabled = env; disabled.players[0].maps[0].enabled = false;
+        check("zero options require enabled existing primary movement", !select_zero_options(profile, disabled, selected, error));
+        auto no_vertical = env; no_vertical.players[0].maps[0].bindings.pop_back();
+        check("zero options require both movement actions", !select_zero_options(profile, no_vertical, selected, error));
+        auto layouts = env; layouts.layouts.push_back({38, "other"});
+        check("zero options refuse ambiguous layouts", !select_zero_options(profile, layouts, selected, error));
+        ProbeContext retained;
+        retained.command.action = RosterAction::input_zero_start;
+        retained.input_profile = profile;
+        retained.input_profile.definitions[0].source_id = 56;
+        retained.control_environment = env;
+        retained.zero_options = valid; retained.zero_options_captured = true; retained.zero_epoch = 7;
+        RewiredInputClientConfig old_config; old_config.zero_only = true; old_config.epoch = 7;
+        old_config.options = valid;
+        auto old_client = std::make_unique<RewiredInputClient>(old_config);
+        retained.zero_mailbox = old_client->mailbox();
+        retained.input_pump = std::make_unique<RewiredInputPump>(); retained.input_owner = InputProbeOwner::zero;
+        const auto old_mailbox = retained.zero_mailbox;
+        const auto* old_pump = retained.input_pump.get();
+        retained.input_profile.definitions.push_back({57, {41, 43}});
+        retained.command.control.source_id = 56;
+        check("zero retry reaches real pump initialization failure", !start_zero_input_owner(retained) && !retained.action_error.empty());
+        check("explicit zero source reaches pump preparation rather than ambiguous auto selection", retained.action_error != "Zero trial source definition is ambiguous");
+        check("zero failed initialization retains previous pump and mailbox", retained.input_pump.get() == old_pump &&
+              retained.zero_mailbox == old_mailbox && retained.input_owner == InputProbeOwner::zero && retained.zero_epoch == 7);
+        check("zero failed initialization preserves retained owner options", retained.zero_options_captured &&
+              retained.zero_options.source_id == valid.source_id && retained.zero_options.category_id == valid.category_id &&
+              retained.zero_options.horizontal_axis_id == valid.horizontal_axis_id);
+        capture_zero_state(retained);
+        check("zero failed restart response does not pair candidate options with previous owner", result_json(retained, 1).find("\"sourceId\":55") != std::string::npos &&
+              result_json(retained, 1).find("\"sourceId\":56") == std::string::npos);
+        const auto retained_json = result_json(retained, 1);
+        check("zero failed start labels retained owner epoch", retained_json.find("\"ownerEpoch\":\"7\"") != std::string::npos &&
+              retained_json.find("\"optionsScope\":\"retainedOwner\"") != std::string::npos);
+        retained.command.action = RosterAction::input_zero_state;
+        check("zero state labels current owner rather than failed request", result_json(retained, 1).find("\"optionsScope\":\"owner\"") != std::string::npos);
+        retained.input_profile.definitions.clear();
+        check("zero selection refusal preserves previous epoch and options", !start_zero_input_owner(retained) &&
+              retained.zero_epoch == 7 && retained.zero_options.source_id == valid.source_id && retained.zero_mailbox == old_mailbox);
+        retained.input_owner = InputProbeOwner::watch;
+        check("watch replacement suppresses previous zero owner's options", result_json(retained, 1).find("\"optionsCaptured\":false") != std::string::npos &&
+              result_json(retained, 1).find("\"ownerEpoch\":") == std::string::npos);
+        ProbeContext exhausted; exhausted.input_profile = profile; exhausted.control_environment = env;
+        exhausted.zero_epoch = (std::numeric_limits<std::uint64_t>::max)();
+        check("zero epoch exhaustion refuses before owner installation", !start_zero_input_owner(exhausted) &&
+              exhausted.action_error == "Zero trial epoch space exhausted" && !exhausted.zero_options_captured &&
+              !exhausted.input_pump && !exhausted.zero_mailbox && exhausted.zero_epoch == (std::numeric_limits<std::uint64_t>::max)());
+        ProbeContext first_attempt; first_attempt.input_profile = profile; first_attempt.control_environment = env;
+        check("zero initial failed initialization has no captured owner options", !start_zero_input_owner(first_attempt) &&
+              !first_attempt.zero_options_captured && !first_attempt.input_pump && !first_attempt.zero_mailbox);
+        ProbeContext unowned; unowned.command.action = RosterAction::input_zero_state;
+        unowned.zero_options = valid; unowned.zero_options_captured = true;
+        const auto unowned_json = result_json(unowned, 1);
+        check("zero response suppresses unowned historical options", unowned_json.find("\"optionsCaptured\":false") != std::string::npos &&
+              unowned_json.find("\"options\":{") == std::string::npos);
+        unowned.input_owner = InputProbeOwner::zero;
+        check("zero response refuses options without a positive owner epoch", result_json(unowned, 1).find("\"optionsCaptured\":false") != std::string::npos);
+    }
+    for (const auto failure : {HookResult::failed, HookResult::timeout, HookResult::busy}) {
+        dispatch_injected = failure;
+        for (const auto action : {RosterAction::input_zero_state, RosterAction::input_zero_stop}) {
+            ProbeContext data; data.command.action = action;
+            RewiredInputClientConfig config; config.zero_only = true;
+            auto client = std::make_unique<RewiredInputClient>(config);
+            data.zero_mailbox = client->mailbox(); data.input_pump = std::make_unique<RewiredInputPump>();
+            data.input_owner = InputProbeOwner::zero;
+            dispatch_hook_calls = 0;
+            const auto result = dispatch_roster_command(nullptr, data, unavailable_dispatch);
+            check("zero status and stop bypass unavailable engine dispatch", result == HookResult::completed && dispatch_hook_calls == 0 && data.action_succeeded && data.zero_captured);
+            check("unstarted zero status does not fabricate resource inspection", !data.zero_resources.captured && data.zero_driver_state.epoch == 0 && data.zero_driver_state.nonzero_attempts == 0);
+            const auto json = result_json(data, 1);
+            check("zero response leaves nonzero and ordering disabled", json.find("\"zeroOnly\":true,\"nonzeroEnabled\":false,\"consumerOrderingProven\":false") != std::string::npos);
+        }
+    }
+    {
+        ProbeContext view; view.command.action = RosterAction::input_zero_state; view.zero_captured = true;
+        view.zero_driver_state.nonzero_attempts = (std::numeric_limits<std::uint64_t>::max)();
+        view.zero_resources.captured = true; view.zero_resources.owned.factory_outcome_unknown = true;
+        view.zero_resources.owned.horizontal = std::numeric_limits<float>::quiet_NaN();
+        view.zero_resources.owned.observation_error = "retained \"factory\"";
+        view.control = std::make_unique<RewiredControllerSession>();
+        const auto json = result_json(view, 1);
+        check("zero snapshot serializes exact counters and uncertainty", json.find("\"nonzeroAttempts\":\"18446744073709551615\"") != std::string::npos && json.find("\"factoryOutcomeUnknown\":true") != std::string::npos);
+        check("zero snapshot escapes diagnostics and rejects nonfinite JSON numbers", json.find("retained \\\"factory\\\"") != std::string::npos && json.find("\"x\":null") != std::string::npos);
+        check("zero response excludes unrelated controller getter", json.find("\"ownedControl\":") == std::string::npos);
+        view.zero_captured = false;
+        check("zero unavailable snapshot suppresses stale resources", result_json(view, 2).find("\"resources\":") == std::string::npos);
     }
     for (const auto failure : {HookResult::failed, HookResult::timeout, HookResult::busy}) {
         dispatch_injected = failure;
@@ -468,6 +631,85 @@ int main(int argc, char** argv) {
     check("controller error suppresses stale environment",controls_json.find("\"controlEnvironment\":{\"state\":\"error\"}")!=std::string::npos);
     c.command={RosterAction::inspect,-1};c.control_status=PlayerReadStatus::Captured;controls_json=result_json(c,30);
     check("unrequested controller query suppresses stale environment",controls_json.find("\"controlEnvironment\":{\"state\":\"not_requested\"}")!=std::string::npos);
+    c.command={RosterAction::control_sources,-1};c.control_status=PlayerReadStatus::Captured;
+    c.control_environment.custom_sources_captured=true;
+    RewiredPlayerInputState source_player;source_player.player_id=1;
+    RewiredMapState source_map;source_map.id=401;source_map.controller_id=400;source_map.controller_type=20;
+    source_map.category_id=17;source_map.layout_id=23;source_map.enabled=true;source_player.maps.push_back(source_map);
+    source_player.custom_sources={{400,7,{2,9},{401}},{402,11,{}, {}}};
+    c.control_environment.players={source_player};
+    auto sources_json=result_json(c,31);
+    check("custom source diagnostic serializes runtime identity separately from definition",sources_json.find("\"action\":\"controlSources\"")!=std::string::npos &&
+          sources_json.find("\"customSourcesCaptured\":true")!=std::string::npos &&
+          sources_json.find("\"customSources\":[{\"controllerId\":400,\"sourceId\":7,\"axisIds\":[2,9],\"mapIds\":[401]},{\"controllerId\":402,\"sourceId\":11,\"axisIds\":[],\"mapIds\":[]}]")!=std::string::npos);
+    std::cout << "ROSTER_CUSTOM_SOURCES_JSON " << sources_json << '\n';
+    c.control_status=PlayerReadStatus::Error;sources_json=result_json(c,32);
+    check("failed custom source query suppresses stale identity",sources_json.find("\"controlEnvironment\":{\"state\":\"error\"}")!=std::string::npos && sources_json.find("\"customSources\":")==std::string::npos);
+    c.control_status=PlayerReadStatus::Captured;c.command.action=RosterAction::control_environment;sources_json=result_json(c,33);
+    check("ordinary environment never exposes opt-in source getter observations",sources_json.find("\"customSourcesCaptured\":")==std::string::npos && sources_json.find("\"customSources\":")==std::string::npos);
+    c.command.action=RosterAction::input_zero_start;c.zero_profile_attempted=c.zero_environment_attempted=true;
+    c.input_profile_status=PlayerReadStatus::Captured;c.action_error="Zero trial source definition is ambiguous";
+    auto admission_json=result_json(c,34);
+    check("failed zero selection preserves actually observed admission catalogs",admission_json.find("\"inputProfile\":{\"state\":\"captured\"")!=std::string::npos &&
+          admission_json.find("\"controlEnvironment\":{\"state\":\"captured\"")!=std::string::npos && admission_json.find("\"customSources\":")==std::string::npos);
+    std::cout << "ROSTER_ZERO_ADMISSION_JSON " << admission_json << '\n';
+    c.zero_environment_attempted=false;admission_json=result_json(c,35);
+    check("unattempted zero admission environment never exposes earlier snapshot",admission_json.find("\"controlEnvironment\":{\"state\":\"not_requested\"}")!=std::string::npos);
+    c.input_profile_status=PlayerReadStatus::Error;admission_json=result_json(c,36);
+    check("failed zero admission profile suppresses stale candidate definitions",admission_json.find("\"inputProfile\":{\"state\":\"error\"}")!=std::string::npos && admission_json.find("\"definitions\":")==std::string::npos);
+    c.command.action=RosterAction::input_zero_state;c.input_profile_status=PlayerReadStatus::Captured;admission_json=result_json(c,37);
+    check("zero status does not imply a fresh admission catalog",admission_json.find("\"inputProfile\":{\"state\":\"not_requested\"}")!=std::string::npos);
+    ProbeContext source_guard;source_guard.command.action=RosterAction::control_sources;
+    source_guard.control_status=PlayerReadStatus::Captured;source_guard.control_environment=c.control_environment;
+    execute_command(&source_guard);
+    check("custom source guard refusal invalidates previous captured metadata",!source_guard.action_succeeded && source_guard.control_status==PlayerReadStatus::Error &&
+          result_json(source_guard,38).find("\"controlEnvironment\":{\"state\":\"error\"}")!=std::string::npos);
+    for(const auto failure:{HookResult::failed,HookResult::timeout,HookResult::busy}) {
+        ProbeContext sequence;sequence.command.action=RosterAction::input_zero_start;
+        sequence.zero_profile_attempted=sequence.zero_environment_attempted=true;
+        sequence.input_profile_status=sequence.control_status=PlayerReadStatus::Captured;
+        sequence.input_profile=c.input_profile;sequence.control_environment=c.control_environment;
+        const auto previous=result_json(sequence,39);
+        check("sequential refusal begins with previously captured admission metadata",previous.find("\"inputProfile\":{\"state\":\"captured\"")!=std::string::npos &&
+              previous.find("\"controlEnvironment\":{\"state\":\"captured\"")!=std::string::npos);
+        // The real worker clears values/statuses before dispatch, not the old attempt flags.
+        sequence.input_profile={};sequence.control_environment={};
+        sequence.input_profile_status=sequence.control_status=PlayerReadStatus::Error;
+        dispatch_injected=failure;
+        const auto status=dispatch_roster_command(GetModuleHandleW(nullptr),sequence,unavailable_dispatch);
+        const auto next=result_json(sequence,40);
+        check("zero unexecuted dispatch resets prior per-read attempts",status==failure && !sequence.zero_profile_attempted && !sequence.zero_environment_attempted &&
+              next.find("\"inputProfile\":{\"state\":\"not_requested\"}")!=std::string::npos && next.find("\"controlEnvironment\":{\"state\":\"not_requested\"}")!=std::string::npos);
+    }
+    ProbeContext source_failure;source_failure.command.action=RosterAction::control_sources;
+    source_failure.control_environment=c.control_environment;source_failure.control_status=PlayerReadStatus::Captured;source_failure.action_succeeded=true;
+    try { throw std::runtime_error("Injected later roster inspection failure"); }
+    catch(const std::exception& e) { fail_roster_callback(source_failure,e.what()); }
+    const auto source_failure_json=result_json(source_failure,41);
+    check("callback failure masks optional sources captured before a later exception",!source_failure.action_succeeded && source_failure.control_status==PlayerReadStatus::Error &&
+          source_failure_json.find("\"controlEnvironment\":{\"state\":\"error\"}")!=std::string::npos && source_failure_json.find("\"customSources\":")==std::string::npos);
+    ProbeContext admission_failure;admission_failure.command.action=RosterAction::input_zero_start;
+    admission_failure.zero_profile_attempted=admission_failure.zero_environment_attempted=true;
+    admission_failure.input_profile=c.input_profile;admission_failure.input_profile_status=PlayerReadStatus::Captured;
+    admission_failure.control_status=PlayerReadStatus::Error;
+    fail_roster_callback(admission_failure,"Injected environment read failure");
+    auto admission_failure_json=result_json(admission_failure,42);
+    check("later callback exception preserves completed zero profile capture",admission_failure.input_profile_status==PlayerReadStatus::Captured &&
+          admission_failure_json.find("\"inputProfile\":{\"state\":\"captured\"")!=std::string::npos && admission_failure_json.find("\"controlEnvironment\":{\"state\":\"error\"}")!=std::string::npos);
+    admission_failure.input_profile_status=admission_failure.control_status=PlayerReadStatus::Captured;
+    admission_failure.control_environment=c.control_environment;
+    fail_roster_callback(admission_failure,"Injected later owner preparation failure");
+    admission_failure_json=result_json(admission_failure,43);
+    check("owner preparation exception preserves both completed zero admission reads",admission_failure_json.find("\"inputProfile\":{\"state\":\"captured\"")!=std::string::npos &&
+          admission_failure_json.find("\"controlEnvironment\":{\"state\":\"captured\"")!=std::string::npos);
+    admission_failure.input_profile_status=PlayerReadStatus::NotReady;admission_failure.zero_environment_attempted=false;
+    fail_roster_callback(admission_failure,"Injected later diagnostic failure");
+    check("callback failure preserves completed not-ready admission result",admission_failure.input_profile_status==PlayerReadStatus::NotReady &&
+          result_json(admission_failure,44).find("\"inputProfile\":{\"state\":\"not_ready\"}")!=std::string::npos);
+    admission_failure.input_profile_status=PlayerReadStatus::Error;
+    fail_roster_callback(admission_failure,"Injected exception during profile read");
+    check("incomplete admission read remains error without stale definitions",result_json(admission_failure,45).find("\"inputProfile\":{\"state\":\"error\"}")!=std::string::npos &&
+          result_json(admission_failure,45).find("\"definitions\":")==std::string::npos);
     if (!std::filesystem::create_directory(directory)) return 2;
     try {
         const auto request = directory / "request";

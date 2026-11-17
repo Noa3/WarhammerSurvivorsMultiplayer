@@ -57,9 +57,11 @@ namespace Rewired
     [Preserve] public sealed class CustomController : ControllerWithAxes
     {
         readonly int source;
-        public static bool FailWrites, FailZero;
+        public static bool FailWrites, FailZero, FailSource;
+        public static int SourceReads;
         public CustomController(int id, int sourceId, int[] axes) : base(id, ControllerType.Custom, axes) { source = sourceId; }
-        [Preserve] public int sourceControllerId => source;
+        [Preserve] public int sourceControllerId { get { ++SourceReads; if (FailSource) throw new InvalidOperationException("Fixture source read failure"); return source; } }
+        public void FixtureIdentifiers(params int[] ids) { identifiers.Clear(); identifiers.AddRange(ids.Select(x => new ControllerElementIdentifier(x))); }
         [Preserve] public void SetAxisValueById(int id, float value)
         {
             if (FailWrites || (FailZero && value == 0)) throw new InvalidOperationException("Fixture axis write failure");
@@ -94,7 +96,8 @@ namespace Rewired
         readonly Controller owner;
         readonly List<ActionElementMap> assignments = new List<ActionElementMap>();
         public int? fixtureIdOverride;
-        public bool fixtureAssigned;
+        public bool fixtureAssigned, fixtureFailEnabledRead;
+        public Controller fixtureOwnerOverride;
         public static bool FailCreate, FailElementCreate, Prepopulate, FailEnable;
         public ControllerMap(Controller controller, int categoryId, int layoutId)
         { owner = controller; category = categoryId; layout = layoutId; value = nextId++; }
@@ -102,10 +105,10 @@ namespace Rewired
         [Preserve] public int categoryId => category;
         [Preserve] public int layoutId => layout;
         [Preserve] public int controllerId => fixtureAssigned ? owner.id : -1;
-        [Preserve] public Controller controller => fixtureAssigned ? owner : null;
+        [Preserve] public Controller controller => fixtureAssigned ? fixtureOwnerOverride ?? owner : null;
         [Preserve] public ControllerType controllerType => owner.type;
         bool active;
-        [Preserve] public bool enabled { get => active; set { if (FailEnable) throw new InvalidOperationException("Fixture enable failure"); active = value; } }
+        [Preserve] public bool enabled { get { if (fixtureFailEnabledRead) throw new InvalidOperationException("Fixture primary observation failure"); return active; } set { if (FailEnable) throw new InvalidOperationException("Fixture enable failure"); active = value; } }
         [Preserve] public IList<ActionElementMap> AllMaps => assignments;
         [Preserve] public IList<ActionElementMap> ElementMaps => assignments;
         [Preserve] public static ControllerMap Create(Controller controller, int categoryId, int layoutId)
@@ -182,13 +185,13 @@ namespace Rewired
         {
             int nextId = 700;
             public readonly List<CustomController> values = new List<CustomController>();
-            public static bool FailCreate, FailDestroy;
+            public static bool FailCreate, FailDestroy, FailAfterCreate, FailGetAfterCreate, FailGet;
             [Preserve] public int customControllerCount => values.Count;
-            [Preserve] public CustomController[] GetCustomControllers() => values.ToArray();
+            [Preserve] public CustomController[] GetCustomControllers() { if (FailGet) throw new InvalidOperationException("Fixture global query failure"); return values.ToArray(); }
             [Preserve] public CustomController GetCustomController(int controllerId) => values.Find(c => c.id == controllerId);
             [Preserve] public CustomController CreateCustomController(int sourceControllerId) => CreateCustomController(sourceControllerId, "");
             [Preserve] public CustomController CreateCustomController(int sourceControllerId, string tag)
-            { if (FailCreate) return null; var c = new CustomController(nextId++, sourceControllerId, fixtureAxes); c.tag = tag; values.Add(c); return c; }
+            { if (FailCreate) return null; var c = new CustomController(nextId++, sourceControllerId, fixtureAxes); c.tag = tag; values.Add(c); if (FailAfterCreate) { if (FailGetAfterCreate) FailGet=true; throw new InvalidOperationException("Fixture failure after custom registration"); } return c; }
             [Preserve] public bool IsCustomControllerAssignedToPlayer(int customControllerId, int playerId)
             { var p = players.GetPlayer(playerId); return p != null && p.controllers.Controllers.Any(c => c.id == customControllerId && c.type == ControllerType.Custom); }
             [Preserve] public bool DestroyCustomController(CustomController customController)

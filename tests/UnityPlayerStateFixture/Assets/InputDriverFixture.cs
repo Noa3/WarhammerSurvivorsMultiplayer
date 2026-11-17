@@ -21,6 +21,7 @@ public sealed class InputDriverFixture : MonoBehaviour
     [DllImport("fixture", CallingConvention = CallingConvention.Cdecl)] static extern void fixture_drive_force_pump_stop();
     [DllImport("fixture", CallingConvention = CallingConvention.Cdecl)] static extern void fixture_drive_drop_worker();
     [DllImport("fixture", CallingConvention = CallingConvention.Cdecl)] static extern ulong fixture_drive_read(int field);
+    [DllImport("fixture", CallingConvention = CallingConvention.Cdecl)] static extern ulong fixture_drive_resource(int field);
     [DllImport("fixture", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr fixture_drive_reason();
     int failures;
     Rewired.Player primary, remote;
@@ -116,7 +117,7 @@ public sealed class InputDriverFixture : MonoBehaviour
 
         int invalid = StartDrive(1);
         yield return Until(() => fixture_drive_read(4) == 1);
-        Check("drive_failed_open_is_retained_then_cleaned", invalid != 0 && fixture_drive_read(4) == 1 && ResourcesGone() && Rewired.ReInput.FixtureInputSubscribers == 0);
+        Check("drive_failed_open_is_retained_then_cleaned", invalid != 0 && fixture_drive_read(4) == 1 && fixture_drive_resource(0) == 1 && fixture_drive_resource(4) == 0 && ResourcesGone() && Rewired.ReInput.FixtureInputSubscribers == 0);
         Check("drive_start_before_run_end", StartDrive() == 0);
         manager.running = false;
         yield return Until(() => fixture_drive_read(4) == 1 && Rewired.ReInput.FixtureInputSubscribers == 0);
@@ -143,6 +144,29 @@ public sealed class InputDriverFixture : MonoBehaviour
         int earlyStop = StartDrive(6);
         yield return Until(() => fixture_drive_read(4) == 1 && fixture_drive_read(5) == 1);
         Check("drive_stop_before_client_start_completes_without_resources", earlyStop != 0 && fixture_drive_read(4) == 1 && fixture_drive_read(5) == 1 && ResourcesGone() && Rewired.ReInput.FixtureInputSubscribers == 0);
+        yield return CleanupFixture();
+        Check("drive_zero_start", StartDrive(5) == 0);
+        Check("drive_zero_live_cached_resource_on_worker", fixture_drive_resource(0) == 1 && fixture_drive_resource(1) == 1 && fixture_drive_resource(2) == 1 && fixture_drive_resource(3) == 1 && fixture_drive_resource(4) == 1);
+        Check("drive_zero_rejects_nonzero_lease", fixture_drive_submit(1, 1, 0.75f, -0.25f, 120) == 0);
+        Check("drive_zero_rejects_zero_lease", fixture_drive_submit(1, 2, 0, 0, 120) == 0);
+        Rewired.ReInput.FixtureFireInput();
+        Check("drive_zero_no_nonzero_attempts", fixture_drive_read(3) == 0 && remote.GetAxis("Move Horizontal") == 0 && remote.GetAxis("Move Vertical") == 0);
+        yield return Until(() => fixture_drive_read(4) == 1 && Rewired.ReInput.FixtureInputSubscribers == 0);
+        Check("drive_zero_recovery_deadline_closes_without_input", fixture_drive_read(4) == 1 && ResourcesGone() && Rewired.ReInput.FixtureInputSubscribers == 0);
+        Check("drive_zero_closed_cached_resource_on_worker", fixture_drive_resource(0) == 1 && fixture_drive_resource(4) == 0);
+        yield return CleanupFixture();
+        Check("drive_zero_duration_zero_refused_before_acquisition", StartDrive(7) != 0 && ResourcesGone() && fixture_drive_resource(0) == 0);
+        yield return CleanupFixture();
+        Check("drive_zero_duration_over_limit_refused_before_acquisition", StartDrive(8) != 0 && ResourcesGone() && fixture_drive_resource(0) == 0);
+        yield return CleanupFixture();
+        Check("drive_zero_start_before_owner_drop", StartDrive(9) == 0);
+        Rewired.Player.ControllerHelper.MapHelper.FailRemove = true;
+        fixture_drive_drop_worker();
+        yield return Until(() => fixture_drive_read(1) == 1);
+        Check("drive_zero_failed_cleanup_cached_after_owner_drop", fixture_drive_read(4) == 0 && fixture_drive_resource(0) == 1 && fixture_drive_resource(4) == 1 && !ResourcesGone());
+        Rewired.Player.ControllerHelper.MapHelper.FailRemove = false;
+        yield return Until(() => fixture_drive_read(4) == 1 && Rewired.ReInput.FixtureInputSubscribers == 0);
+        Check("drive_zero_retry_after_owner_drop", fixture_drive_read(4) == 1 && fixture_drive_resource(0) == 1 && fixture_drive_resource(4) == 0 && ResourcesGone());
         Debug.Log("DRIVE_TEST RESULT failures=" + failures);
         Application.Quit(failures == 0 ? 0 : 1);
     }

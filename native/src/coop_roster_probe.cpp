@@ -4,11 +4,14 @@
 #include "wsm/rewired_input_profile.h"
 #include "wsm/rewired_control_pulse.h"
 #include "wsm/rewired_input_pump.h"
+#include "wsm/rewired_input_client.h"
 #include "wsm/upgrade_pass_hook.h"
 #include "wsm/upgrade_pass_profile.h"
 #include "wsm/upgrade_choice_controller.h"
 #include "wsm/player_camera_controller.h"
 #include <cmath>
+#include <algorithm>
+#include <set>
 #include <atomic>
 #include "wsm/window_hook.h"
 #include <charconv>
@@ -24,7 +27,15 @@
 
 namespace wsm {
 namespace {
-enum class RosterAction { inspect, enroll, rollback, select_player, copy_character, upgrade_context, upgrade_selection, upgrade_items, upgrade_hint, equipment, input_profile, control_environment, control_open, control_pulse, control_close, upgrade_hook_inspect, upgrade_hook_install, upgrade_hook_remove, upgrade_offer, upgrade_choose, upgrade_choice_close, camera_open, camera_mode, camera_state, camera_close, input_watch_start, input_watch_state, input_watch_stop };
+enum class RosterAction { inspect, enroll, rollback, select_player, copy_character, upgrade_context, upgrade_selection, upgrade_items, upgrade_hint, equipment, input_profile, control_environment, control_open, control_pulse, control_close, upgrade_hook_inspect, upgrade_hook_install, upgrade_hook_remove, upgrade_offer, upgrade_choose, upgrade_choice_close, camera_open, camera_mode, camera_state, camera_close, input_watch_start, input_watch_state, input_watch_stop, input_zero_start, input_zero_state, input_zero_stop, control_sources };
+enum class InputProbeOwner { none, watch, zero };
+bool input_zero_action(RosterAction action) {
+    return action == RosterAction::input_zero_start || action == RosterAction::input_zero_state || action == RosterAction::input_zero_stop;
+}
+bool input_zero_opt_in() {
+    wchar_t value[8]{};
+    return GetEnvironmentVariableW(L"WSM_INPUT_ZERO_TRIAL_OPT_IN", value, 8) == 1 && value[0] == L'1';
+}
 bool input_watch_action(RosterAction action) {
     return action == RosterAction::input_watch_start || action == RosterAction::input_watch_state || action == RosterAction::input_watch_stop;
 }
@@ -87,13 +98,29 @@ bool parse_command(std::string_view text, DWORD expected_pid, RosterCommand& out
     while (!text.empty() && (text.back() == '\r' || text.back() == '\n')) text.remove_suffix(1);
     RosterCommand result;
     if (text == "inspect") { output = result; return true; }
+    constexpr std::string_view zero_start_prefix = "inputZeroStart:";
+    if (text.substr(0, zero_start_prefix.size()) == zero_start_prefix) {
+        text.remove_prefix(zero_start_prefix.size());
+        const auto separator = text.find(':');
+        DWORD pid = 0;
+        if (!number(text.substr(0, separator), pid) || pid != expected_pid) return false;
+        if (separator != std::string_view::npos) {
+            const auto source = text.substr(separator + 1);
+            if (source.empty() || source.find_first_not_of("0123456789") != std::string_view::npos ||
+                !number(source, result.control.source_id)) return false;
+        }
+        result.action = RosterAction::input_zero_start; output = result; return true;
+    }
     for(const auto& route:std::initializer_list<std::pair<std::string_view,RosterAction>>{
         {"controlEnvironment:",RosterAction::control_environment},{"controlClose:",RosterAction::control_close},
+        {"controlSources:",RosterAction::control_sources},
         {"upgradeHook:",RosterAction::upgrade_hook_inspect},{"upgradeHookInstall:",RosterAction::upgrade_hook_install},
         {"upgradeHookRemove:",RosterAction::upgrade_hook_remove},{"upgradeChoiceClose:",RosterAction::upgrade_choice_close},
         {"cameraState:",RosterAction::camera_state},{"cameraClose:",RosterAction::camera_close},
         {"inputWatchStart:",RosterAction::input_watch_start},{"inputWatchState:",RosterAction::input_watch_state},
-        {"inputWatchStop:",RosterAction::input_watch_stop}}) {
+        {"inputWatchStop:",RosterAction::input_watch_stop},
+        {"inputZeroState:",RosterAction::input_zero_state},
+        {"inputZeroStop:",RosterAction::input_zero_stop}}) {
         if(text.substr(0,route.first.size())==route.first) {
             DWORD pid=0;if(!number(text.substr(route.first.size()),pid)||pid!=expected_pid)return false;
             result.action=route.second;output=result;return true;
@@ -290,6 +317,14 @@ struct ProbeContext {
     PlayerReadStatus control_status = PlayerReadStatus::Error;
     std::string control_error;
     std::unique_ptr<RewiredInputPump> input_pump;
+    InputProbeOwner input_owner = InputProbeOwner::none;
+    std::shared_ptr<RewiredInputMailbox> zero_mailbox;
+    std::uint64_t zero_epoch = 0;
+    RewiredControlOptions zero_options;
+    RewiredInputPumpState zero_pump_state;
+    InputDriverStatus zero_driver_state;
+    RewiredInputResourceState zero_resources;
+    bool zero_captured = false, zero_stopped = false, zero_options_captured = false;
     RewiredInputPumpState input_watch_state;
     bool input_watch_captured = false;
     bool startup_patch_checked=false,startup_patch_verified=false;
@@ -309,6 +344,7 @@ struct ProbeContext {
     PlayerReadStatus upgrade_status = PlayerReadStatus::Error;
     PlayerReadStatus equipment_status = PlayerReadStatus::Error;
     PlayerReadStatus input_profile_status = PlayerReadStatus::Error;
+    bool zero_profile_attempted = false, zero_environment_attempted = false;
     bool action_succeeded = false;
     std::string error;
     std::string action_error, roster_error, configuration_error, player_error, upgrade_error;
@@ -319,8 +355,122 @@ bool ensure_control(ProbeContext& c) {
     if(!session->initialize(c.module,c.api,c.domain,c.window.thread,0,c.action_error))return false;
     c.control=std::move(session);return true;
 }
+// An explicit definition ID is an operator choice, not an inferred gameplay role.
+// Without a choice, retain unique-source admission. All IDs are freshly checked;
+// axis order is immaterial for zero and establishes no nonzero movement mapping.
+bool select_zero_options(const RewiredInputProfileSnapshot& profile, const RewiredControlEnvironment& env,
+                         RewiredControlOptions& output, std::string& error, std::int32_t requested_source = -1) {
+    error.clear();
+    if (requested_source < -1) { error = "Invalid explicit zero-trial source definition ID"; return false; }
+    if (env.horizontal_action_id < 0 || env.vertical_action_id < 0 || env.horizontal_action_id == env.vertical_action_id ||
+        profile.horizontal_action_id != env.horizontal_action_id || profile.vertical_action_id != env.vertical_action_id) {
+        error = "Zero trial requires matching live movement action IDs"; return false;
+    }
+    const RewiredControllerDefinitionSnapshot* source = nullptr;
+    bool explicit_match = false;
+    for (const auto& definition : profile.definitions) {
+        if (requested_source >= 0) {
+            if (definition.source_id != requested_source) continue;
+            if (explicit_match) { error = "Explicit zero-trial source definition is duplicated"; return false; }
+            explicit_match = true;
+        }
+        if (definition.source_id < 0 || definition.axis_ids.size() != 2 || definition.axis_ids[0] < 0 ||
+            definition.axis_ids[1] < 0 || definition.axis_ids[0] == definition.axis_ids[1]) continue;
+        if (source) { error = "Zero trial source definition is ambiguous"; return false; }
+        source = &definition;
+    }
+    if (!source) { error = requested_source >= 0 ? "Explicit zero-trial source is absent or lacks exactly two distinct axes" :
+        "Zero trial needs a live definition with exactly two distinct axes"; return false; }
+    const RewiredPlayerInputState* primary = nullptr;
+    for (const auto& player : env.players) if (player.player_id == 0) {
+        if (primary) { error = "Zero trial primary player is ambiguous"; return false; }
+        primary = &player;
+    }
+    std::set<std::int32_t> categories;
+    if (primary) for (const auto& category : env.categories) {
+        bool horizontal = false, vertical = false;
+        if (category.id < 0) continue;
+        for (const auto& map : primary->maps) if (map.enabled && map.category_id == category.id)
+            for (const auto& binding : map.bindings) {
+                horizontal |= binding.action_id == env.horizontal_action_id;
+                vertical |= binding.action_id == env.vertical_action_id;
+            }
+        if (horizontal && vertical) categories.insert(category.id);
+    }
+    if (categories.size() != 1 || env.layouts.size() != 1 || env.layouts[0].id < 0) {
+        error = "Zero trial requires one enabled movement category and one live custom layout"; return false;
+    }
+    RewiredControlOptions selected;
+    selected.player_id = 1; selected.source_id = source->source_id;
+    selected.horizontal_axis_id = source->axis_ids[0]; selected.vertical_axis_id = source->axis_ids[1];
+    selected.category_id = *categories.begin(); selected.layout_id = env.layouts[0].id;
+    output = selected; return true;
+}
+bool start_zero_input_owner(ProbeContext& c) {
+    RewiredControlOptions options;
+    if (!select_zero_options(c.input_profile, c.control_environment, options, c.action_error, c.command.control.source_id)) return false;
+    auto pump = std::make_unique<RewiredInputPump>();
+    if (c.zero_epoch == UINT64_MAX) { c.action_error = "Zero trial epoch space exhausted"; return false; }
+    if (!pump->initialize(c.module, c.api, c.domain, c.bridge, c.window.hwnd,
+                          c.window.thread, c.identity.managed_thread, c.action_error)) return false;
+    RewiredInputClientConfig config;
+    config.game = c.module; config.api = c.api; config.domain = c.domain;
+    config.window = c.window.hwnd; config.native_thread = c.window.thread;
+    config.managed_thread = c.identity.managed_thread; config.epoch = c.zero_epoch + 1;
+    config.options = options; config.zero_only = true; config.zero_only_max_ms = 15000;
+    auto client = std::make_unique<RewiredInputClient>(config);
+    // Publish options and epoch only with their owner, including a failed start's cleanup owner.
+    c.zero_mailbox = client->mailbox(); c.input_pump = std::move(pump);
+    c.input_owner = InputProbeOwner::zero; c.input_watch_captured = false;
+    c.zero_options = options; c.zero_epoch = config.epoch; c.zero_options_captured = true;
+    return c.input_pump->start(std::move(client), c.action_error);
+}
+void capture_zero_state(ProbeContext& c) {
+    c.zero_captured = c.input_owner == InputProbeOwner::zero && c.input_pump && c.zero_mailbox;
+    if (!c.zero_captured) return;
+    c.zero_pump_state = c.input_pump->state();
+    c.zero_driver_state = c.zero_mailbox->status();
+    c.zero_resources = c.zero_mailbox->resource_state();
+    c.zero_stopped = c.zero_mailbox->stopped();
+}
+void prepare_input_observation(ProbeContext& c) {
+    if (c.command.action == RosterAction::input_zero_start) {
+        c.zero_profile_attempted = c.zero_environment_attempted = false;
+        c.input_profile_status = PlayerReadStatus::Error;
+    }
+    if (c.command.action == RosterAction::control_environment || c.command.action == RosterAction::control_sources ||
+        c.command.action == RosterAction::input_zero_start) c.control_status = PlayerReadStatus::Error;
+    if (input_zero_action(c.command.action)) c.zero_captured = false;
+}
+void fail_roster_callback(ProbeContext& c, const char* message) {
+    c.error = c.action_error = message; c.status = CoopRosterStatus::Error;
+    c.upgrade_status = PlayerReadStatus::Error; c.equipment_status = PlayerReadStatus::Error;
+    // Optional source queries fail as a whole. Zero admission instead reports
+    // each completed read truthfully even if a later read or owner setup throws.
+    if (c.command.action != RosterAction::input_zero_start || !c.zero_profile_attempted)
+        c.input_profile_status = PlayerReadStatus::Error;
+    if (c.command.action != RosterAction::input_zero_start || !c.zero_environment_attempted)
+        c.control_status = PlayerReadStatus::Error;
+    c.action_succeeded = false; c.configuration_captured = false;
+}
 void execute_command(void* raw) {
     auto& c = *static_cast<ProbeContext*>(raw);
+    prepare_input_observation(c);
+    if (c.command.action == RosterAction::input_zero_start && !input_zero_opt_in()) {
+        c.action_succeeded = false;
+        c.error = c.action_error = "Zero-only controller trial requires separate WSM_INPUT_ZERO_TRIAL_OPT_IN=1";
+        return;
+    }
+    if (c.command.action == RosterAction::input_zero_state || c.command.action == RosterAction::input_zero_stop) {
+        c.action_error.clear(); c.error.clear();
+        if (c.input_owner == InputProbeOwner::zero && c.input_pump && c.zero_mailbox) {
+            if (c.command.action == RosterAction::input_zero_stop) { c.zero_mailbox->stop(); c.input_pump->stop(); }
+            capture_zero_state(c); c.action_succeeded = true;
+        } else {
+            c.action_succeeded = false; c.error = c.action_error = "No zero-only trial owns this input pump";
+        }
+        return;
+    }
     if (input_watch_action(c.command.action)) c.input_watch_captured = false;
     if (c.command.action == RosterAction::input_watch_start && !input_watch_opt_in()) {
         c.action_succeeded = false;
@@ -330,6 +480,10 @@ void execute_command(void* raw) {
     // Status and stop are data-only: no engine call or synchronous cleanup.
     if (c.command.action == RosterAction::input_watch_state || c.command.action == RosterAction::input_watch_stop) {
         c.action_error.clear(); c.error.clear();
+        if (c.input_owner == InputProbeOwner::zero) {
+            c.action_succeeded = false; c.input_watch_captured = false;
+            c.error = c.action_error = "Input pump belongs to zero-only trial; use its state/stop route"; return;
+        }
         if (c.input_pump && c.command.action == RosterAction::input_watch_stop) c.input_pump->stop();
         c.input_watch_state = c.input_pump ? c.input_pump->state() : RewiredInputPumpState{};
         c.input_watch_captured = c.input_pump != nullptr;
@@ -363,6 +517,34 @@ void execute_command(void* raw) {
     }
     try {
         if (!c.guard.verify(c.window.thread, 0, c.identity, c.action_error)) { c.error = c.action_error; return; }
+        if (c.command.action == RosterAction::input_zero_start) {
+            c.action_succeeded = false;
+            if ((c.input_pump && !c.input_pump->state().cleanup_complete) ||
+                (c.control && c.control->state().cleanup_required)) {
+                c.action_error = "Previous input owner still requires cleanup";
+            } else {
+                bool running = false;
+                SceneStateSnapshot live;
+                const auto run_status = c.player.read_run_state(running, c.action_error);
+                if (run_status != PlayerReadStatus::Captured || !running ||
+                    c.player.read(live, c.action_error) != PlayerReadStatus::Captured || live.players.size() != 2 ||
+                    live.players[0].slot != 0 || live.players[1].slot != 1 || live.players[0].input_id != 0 || live.players[1].input_id != 1 ||
+                    live.players[0].dead || live.players[1].dead || !(live.players[0].hp > 0) || !(live.players[1].hp > 0)) {
+                    c.action_error = "Zero trial requires a verified running scene with two living input-0/input-1 actors";
+                } else if (ensure_control(c)) {
+                    c.zero_profile_attempted = true;
+                    c.input_profile_status = read_rewired_input_profile(c.module, c.api, c.domain, c.window.thread,
+                        c.identity.managed_thread, c.input_profile, c.action_error);
+                    if (c.input_profile_status == PlayerReadStatus::Captured) {
+                        c.zero_environment_attempted = true;
+                        c.control_status = c.control->inspect(c.control_environment, c.action_error);
+                        if (c.control_status == PlayerReadStatus::Captured) c.action_succeeded = start_zero_input_owner(c);
+                    }
+                }
+                if (!c.action_succeeded && c.action_error.empty()) c.action_error = "Live zero-trial configuration is not ready";
+            }
+            capture_zero_state(c); c.error = c.action_error; return;
+        }
         if (c.command.action == RosterAction::input_watch_start) {
             if (c.input_pump && !c.input_pump->state().cleanup_complete) {
                 c.action_error = "Previous input observation still owns its cleanup";
@@ -371,6 +553,7 @@ void execute_command(void* raw) {
                 if (pump->initialize(c.module, c.api, c.domain, c.bridge, c.window.hwnd,
                                      c.window.thread, c.identity.managed_thread, c.action_error)) {
                     c.input_pump = std::move(pump);
+                    c.input_owner = InputProbeOwner::watch;
                     c.action_succeeded = c.input_pump->start(std::make_unique<InputWatchClient>(), c.action_error);
                 }
             }
@@ -419,10 +602,19 @@ void execute_command(void* raw) {
             c.startup_patch_checked=true;
             c.startup_patch_verified=verify_upgrade_pass_image(c.module,true,c.startup_patch_error);
             c.action_succeeded=true;
-        } else if(c.command.action==RosterAction::control_environment) {
-            if(ensure_control(c)) {c.control_status=c.control->inspect(c.control_environment,c.action_error);c.action_succeeded=c.control_status==PlayerReadStatus::Captured;}
+        } else if(c.command.action==RosterAction::control_environment || c.command.action==RosterAction::control_sources) {
+            if(ensure_control(c)) {
+                c.control_status=c.command.action==RosterAction::control_sources?
+                    c.control->inspect_sources(c.control_environment,c.action_error):c.control->inspect(c.control_environment,c.action_error);
+                if(c.control_status==PlayerReadStatus::Captured && c.command.action==RosterAction::control_sources &&
+                    !c.control_environment.custom_sources_captured) {
+                    c.control_status=PlayerReadStatus::Error;c.action_error="Assigned custom sources were not captured";
+                }
+                c.action_succeeded=c.control_status==PlayerReadStatus::Captured;
+            }
         } else if(c.command.action==RosterAction::control_open) {
             if(!control_opt_in())c.action_error="Controller mutation requires explicit WSM_COOP_CONTROL_OPT_IN=1";
+            else if(c.input_owner==InputProbeOwner::zero && c.input_pump && !c.input_pump->state().cleanup_complete)c.action_error="Zero-only input owner still requires cleanup";
             else if(ensure_control(c))c.action_succeeded=c.control->open(c.command.control,c.action_error);
         } else if(c.command.action==RosterAction::control_close) {
             c.action_succeeded=!c.control||c.control->close(c.action_error);
@@ -455,8 +647,8 @@ void execute_command(void* raw) {
         if (c.command.action == RosterAction::inspect) c.action_succeeded = c.status == CoopRosterStatus::Captured;
         c.error = !c.action_error.empty() ? c.action_error : !c.roster_error.empty() ? c.roster_error :
             !c.configuration_error.empty() ? c.configuration_error : !c.upgrade_error.empty() ? c.upgrade_error : c.player_error;
-    } catch (const std::exception& e) { c.error = c.action_error = e.what(); c.status = CoopRosterStatus::Error; c.upgrade_status=PlayerReadStatus::Error; c.equipment_status=PlayerReadStatus::Error; c.input_profile_status=PlayerReadStatus::Error; c.action_succeeded = false; c.configuration_captured = false; }
-    catch (...) { c.error = c.action_error = "Unknown native roster callback failure"; c.status = CoopRosterStatus::Error; c.upgrade_status=PlayerReadStatus::Error; c.equipment_status=PlayerReadStatus::Error; c.input_profile_status=PlayerReadStatus::Error; c.action_succeeded = false; c.configuration_captured = false; }
+    } catch (const std::exception& e) { fail_roster_callback(c, e.what()); }
+    catch (...) { fail_roster_callback(c, "Unknown native roster callback failure"); }
 }
 std::string quoted_json(std::string_view value) {
     static constexpr char hex[] = "0123456789abcdef";
@@ -475,7 +667,10 @@ HookResult dispatch_roster_teardown(HMODULE bridge, ProbeContext& c, void (*clea
 }
 HookResult dispatch_roster_command(HMODULE bridge, ProbeContext& c,
                                   decltype(&run_window_hook) hook = run_window_hook_waiting) {
-    if (c.command.action == RosterAction::input_watch_state || c.command.action == RosterAction::input_watch_stop) {
+    // Hook refusal never enters execute_command, but still starts a new request.
+    prepare_input_observation(c);
+    if (c.command.action == RosterAction::input_watch_state || c.command.action == RosterAction::input_watch_stop ||
+        c.command.action == RosterAction::input_zero_state || c.command.action == RosterAction::input_zero_stop) {
         execute_command(&c);
         return HookResult::completed;
     }
@@ -485,6 +680,7 @@ std::string result_json(const ProbeContext& c, unsigned sample) {
     const char* state = c.status == CoopRosterStatus::Captured ? "captured" : c.status == CoopRosterStatus::NotReady ? "not_ready" : "error";
     const char* action = c.command.action == RosterAction::inspect ? "inspect" : c.command.action == RosterAction::enroll ? "enroll" : c.command.action == RosterAction::select_player ? "select" : c.command.action == RosterAction::copy_character ? "copyCharacter" : c.command.action == RosterAction::upgrade_context ? "upgradeContext" : c.command.action == RosterAction::upgrade_selection ? "upgradeSelection" : c.command.action == RosterAction::upgrade_items ? "upgradeItems" : c.command.action == RosterAction::upgrade_hint ? "upgradeHint" : c.command.action==RosterAction::equipment?"equipment":c.command.action==RosterAction::input_profile?"inputProfile":"rollback";
     if(c.command.action==RosterAction::control_environment)action="controlEnvironment";
+    if(c.command.action==RosterAction::control_sources)action="controlSources";
     if(c.command.action==RosterAction::control_open)action="controlOpen";
     if(c.command.action==RosterAction::control_pulse)action="controlPulse";
     if(c.command.action==RosterAction::control_close)action="controlClose";
@@ -501,6 +697,9 @@ std::string result_json(const ProbeContext& c, unsigned sample) {
     if(c.command.action==RosterAction::input_watch_start)action="inputWatchStart";
     if(c.command.action==RosterAction::input_watch_state)action="inputWatchState";
     if(c.command.action==RosterAction::input_watch_stop)action="inputWatchStop";
+    if(c.command.action==RosterAction::input_zero_start)action="inputZeroStart";
+    if(c.command.action==RosterAction::input_zero_state)action="inputZeroState";
+    if(c.command.action==RosterAction::input_zero_stop)action="inputZeroStop";
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << "{\"schemaVersion\":1,\"sample\":" << sample << ",\"action\":\"" << action
@@ -608,7 +807,8 @@ std::string result_json(const ProbeContext& c, unsigned sample) {
         out << "]}";
     }
     out << "]}";
-    const bool profile_requested=c.command.action==RosterAction::input_profile;
+    const bool profile_requested=c.command.action==RosterAction::input_profile ||
+        (c.command.action==RosterAction::input_zero_start && c.zero_profile_attempted);
     const bool profile_captured=profile_requested&&c.input_profile_status==PlayerReadStatus::Captured;
     const char* profile_state=!profile_requested?"not_requested":profile_captured?"captured":c.input_profile_status==PlayerReadStatus::NotReady?"not_ready":"error";
     out << ",\"inputProfile\":{\"state\":\"" << profile_state << '"';
@@ -625,20 +825,36 @@ std::string result_json(const ProbeContext& c, unsigned sample) {
         out << ']';
     }
     out << '}';
-    const bool environment_requested=c.command.action==RosterAction::control_environment;
+    const bool sources_requested=c.command.action==RosterAction::control_sources;
+    const bool environment_requested=c.command.action==RosterAction::control_environment || sources_requested ||
+        (c.command.action==RosterAction::input_zero_start && c.zero_environment_attempted);
     out << ",\"controlEnvironment\":{\"state\":" << quoted_json(!environment_requested?"not_requested":c.control_status==PlayerReadStatus::Captured?"captured":c.control_status==PlayerReadStatus::NotReady?"not_ready":"error");
     if(environment_requested&&c.control_status==PlayerReadStatus::Captured) {
         out<<",\"horizontalActionId\":"<<c.control_environment.horizontal_action_id<<",\"verticalActionId\":"<<c.control_environment.vertical_action_id;
         const auto named=[&](const char* label,const std::vector<RewiredNamedId>& values){out<<",\""<<label<<"\":[";for(std::size_t i=0;i<values.size();++i){if(i)out<<',';out<<"{\"id\":"<<values[i].id<<",\"name\":"<<quoted_json(values[i].name)<<'}';}out<<']';};
         named("categories",c.control_environment.categories);named("layouts",c.control_environment.layouts);
+        if(sources_requested)out<<",\"customSourcesCaptured\":"<<(c.control_environment.custom_sources_captured?"true":"false");
         out<<",\"players\":[";
         for(std::size_t i=0;i<c.control_environment.players.size();++i){if(i)out<<',';const auto& p=c.control_environment.players[i];out<<"{\"playerId\":"<<p.player_id<<",\"x\":"<<p.horizontal<<",\"y\":"<<p.vertical<<",\"maps\":[";
             for(std::size_t j=0;j<p.maps.size();++j){if(j)out<<',';const auto& m=p.maps[j];out<<"{\"id\":"<<m.id<<",\"controllerId\":"<<m.controller_id<<",\"controllerType\":"<<m.controller_type<<",\"categoryId\":"<<m.category_id<<",\"layoutId\":"<<m.layout_id<<",\"enabled\":"<<(m.enabled?"true":"false")<<",\"bindings\":[";
-                for(std::size_t n=0;n<m.bindings.size();++n){if(n)out<<',';const auto& b=m.bindings[n];out<<"{\"actionId\":"<<b.action_id<<",\"elementId\":"<<b.element_id<<",\"elementType\":"<<b.element_type<<",\"axisRange\":"<<b.axis_range<<",\"inverted\":"<<(b.inverted?"true":"false")<<'}';}out<<"]}";}out<<"]}";}
+                for(std::size_t n=0;n<m.bindings.size();++n){if(n)out<<',';const auto& b=m.bindings[n];out<<"{\"actionId\":"<<b.action_id<<",\"elementId\":"<<b.element_id<<",\"elementType\":"<<b.element_type<<",\"axisRange\":"<<b.axis_range<<",\"inverted\":"<<(b.inverted?"true":"false")<<'}';}out<<"]}";}out<<']';
+            if(sources_requested && c.control_environment.custom_sources_captured) {
+                out<<",\"customSources\":[";
+                for(std::size_t j=0;j<p.custom_sources.size();++j) {
+                    if(j)out<<',';const auto& s=p.custom_sources[j];
+                    out<<"{\"controllerId\":"<<s.controller_id<<",\"sourceId\":"<<s.source_id<<",\"axisIds\":[";
+                    for(std::size_t n=0;n<s.axis_ids.size();++n){if(n)out<<',';out<<s.axis_ids[n];}
+                    out<<"],\"mapIds\":[";
+                    for(std::size_t n=0;n<s.map_ids.size();++n){if(n)out<<',';out<<s.map_ids[n];}
+                    out<<"]}";
+                }
+                out<<']';
+            }
+            out<<'}';}
         out<<']';
     }
     out<<'}';
-    if(c.control && !input_watch_action(c.command.action)){const auto s=c.control->state();out<<",\"ownedControl\":{\"playerId\":"<<s.player_id<<",\"controllerId\":"<<s.controller_id<<",\"mapId\":"<<s.map_id<<",\"created\":"<<(s.controller_created?"true":"false")<<",\"attached\":"<<(s.controller_attached?"true":"false")<<",\"registered\":"<<(s.map_registered?"true":"false")<<",\"cleanupRequired\":"<<(s.cleanup_required?"true":"false")<<",\"x\":"<<s.horizontal<<",\"y\":"<<s.vertical<<'}';}
+    if(c.control && !input_watch_action(c.command.action) && !input_zero_action(c.command.action)){const auto s=c.control->state();out<<",\"ownedControl\":{\"playerId\":"<<s.player_id<<",\"controllerId\":"<<s.controller_id<<",\"mapId\":"<<s.map_id<<",\"created\":"<<(s.controller_created?"true":"false")<<",\"attached\":"<<(s.controller_attached?"true":"false")<<",\"registered\":"<<(s.map_registered?"true":"false")<<",\"cleanupRequired\":"<<(s.cleanup_required?"true":"false")<<",\"x\":"<<s.horizontal<<",\"y\":"<<s.vertical<<'}';}
     if(c.command.action==RosterAction::control_pulse){out<<",\"pulse\":{\"nonzeroWritten\":"<<(c.pulse.nonzero_written?"true":"false")<<",\"neutralized\":"<<(c.pulse.neutralized?"true":"false")<<",\"focusLost\":"<<(c.pulse.focus_lost?"true":"false")<<",\"resourcesClosed\":"<<(c.pulse.resources_closed?"true":"false")<<",\"updates\":"<<c.pulse.updates;
         out<<",\"before\":"<<player_observation_json(c.pulse.before.players.empty()?PlayerReadStatus::NotReady:PlayerReadStatus::Captured,c.pulse.before,c.identity,sample)<<",\"after\":"<<player_observation_json(c.pulse.after.players.empty()?PlayerReadStatus::NotReady:PlayerReadStatus::Captured,c.pulse.after,c.identity,sample)<<'}';}
     if(c.command.action==RosterAction::upgrade_hook_inspect || c.command.action==RosterAction::upgrade_hook_install || c.command.action==RosterAction::upgrade_hook_remove) {
@@ -707,6 +923,61 @@ std::string result_json(const ProbeContext& c, unsigned sample) {
                 << ",\"lastInputMs\":" << quoted_json(std::to_string(s.last_input_ms))
                 << ",\"lastRecoveryMs\":" << quoted_json(std::to_string(s.last_recovery_ms))
                 << ",\"error\":" << quoted_json(s.error);
+        }
+        out << '}';
+    }
+    if (input_zero_action(c.command.action)) {
+        const bool owned_options = c.input_owner == InputProbeOwner::zero && c.zero_options_captured && c.zero_epoch != 0;
+        out << ",\"inputZero\":{\"stateCaptured\":" << (c.zero_captured ? "true" : "false")
+            << ",\"zeroOnly\":true,\"nonzeroEnabled\":false,\"consumerOrderingProven\":false"
+            << ",\"optionsCaptured\":" << (owned_options ? "true" : "false");
+        if (owned_options) {
+            const auto& o = c.zero_options;
+            out << ",\"ownerEpoch\":" << quoted_json(std::to_string(c.zero_epoch))
+                << ",\"optionsScope\":" << quoted_json(c.command.action == RosterAction::input_zero_start && !c.action_succeeded ? "retainedOwner" : "owner")
+                << ",\"options\":{\"playerId\":" << o.player_id << ",\"sourceId\":" << o.source_id
+                << ",\"categoryId\":" << o.category_id << ",\"layoutId\":" << o.layout_id
+                << ",\"horizontalAxisId\":" << o.horizontal_axis_id << ",\"verticalAxisId\":" << o.vertical_axis_id << '}';
+        }
+        if (c.zero_captured) {
+            const auto& p = c.zero_pump_state;
+            const auto& d = c.zero_driver_state;
+            out << ",\"started\":" << (p.started ? "true" : "false")
+                << ",\"subscriptionPending\":" << (p.subscription_pending ? "true" : "false")
+                << ",\"stopRequested\":" << (p.stop_requested ? "true" : "false")
+                << ",\"cleanupComplete\":" << (p.cleanup_complete ? "true" : "false")
+                << ",\"recoveryRunning\":" << (p.recovery_running ? "true" : "false")
+                << ",\"windowLost\":" << (p.window_lost ? "true" : "false")
+                << ",\"inputUpdates\":" << quoted_json(std::to_string(p.input_updates))
+                << ",\"recoveryUpdates\":" << quoted_json(std::to_string(p.recovery_updates))
+                << ",\"foreignCallbacks\":" << quoted_json(std::to_string(p.foreign_callbacks))
+                << ",\"reentrantCallbacks\":" << quoted_json(std::to_string(p.reentrant_callbacks))
+                << ",\"pumpError\":" << quoted_json(p.error)
+                << ",\"mailboxStopped\":" << (c.zero_stopped ? "true" : "false")
+                << ",\"driver\":{\"epoch\":" << quoted_json(std::to_string(d.epoch))
+                << ",\"state\":" << quoted_json(d.state == InputDriverState::idle ? "idle" : d.state == InputDriverState::active ? "active" : "cleanup_pending")
+                << ",\"cleanupPending\":" << (d.cleanup_pending ? "true" : "false")
+                << ",\"neutrality\":" << quoted_json(d.neutrality == InputNeutrality::neutral ? "neutral" : d.neutrality == InputNeutrality::nonzero ? "nonzero" : "unknown")
+                << ",\"nonzeroAttempts\":" << quoted_json(std::to_string(d.nonzero_attempts))
+                << ",\"error\":" << quoted_json(d.error) << '}'
+                << ",\"resourceSnapshotCaptured\":" << (c.zero_resources.captured ? "true" : "false");
+            if (c.zero_resources.captured) {
+                const auto& s = c.zero_resources.owned;
+                out << ",\"resources\":{\"controllerId\":" << s.controller_id << ",\"mapId\":" << s.map_id
+                    << ",\"created\":" << (s.controller_created ? "true" : "false")
+                    << ",\"attached\":" << (s.controller_attached ? "true" : "false")
+                    << ",\"registered\":" << (s.map_registered ? "true" : "false")
+                    << ",\"cleanupRequired\":" << (s.cleanup_required ? "true" : "false")
+                    << ",\"factoryOutcomeUnknown\":" << (s.factory_outcome_unknown ? "true" : "false")
+                    << ",\"primaryVerified\":" << (s.primary_verified ? "true" : "false")
+                    << ",\"releaseVerified\":" << (s.release_verified ? "true" : "false")
+                    << ",\"lastControllerId\":" << s.last_controller_id << ",\"lastMapId\":" << s.last_map_id
+                    << ",\"globalCustomsBefore\":" << s.global_customs_before << ",\"globalCustomsAfter\":" << s.global_customs_after
+                    << ",\"observationError\":" << quoted_json(s.observation_error) << ",\"x\":";
+                if (std::isfinite(s.horizontal)) out << s.horizontal; else out << "null";
+                out << ",\"y\":"; if (std::isfinite(s.vertical)) out << s.vertical; else out << "null";
+                out << '}';
+            }
         }
         out << '}';
     }
