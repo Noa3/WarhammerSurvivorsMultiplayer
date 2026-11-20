@@ -4,9 +4,11 @@
 
 ## Start without building
 
-The current repository package starts at `distribution/win-x64/Start-WSM.cmd`. Download or clone the complete repository, enter your installed game folder and accept the save warning. Older tools-preview assets on [GitHub Releases](https://github.com/Noa3/WarhammerSurvivorsMultiplayer/releases) do not contain the newer in-game interface. A newly built portable archive uses `WSM/Start-WSM.cmd` after extraction.
+Download and extract the complete repository ZIP or clone it. Start `distribution/win-x64/Start-WSM.cmd`. Back up your saves before accepting the warning. Confirm the detected Steam folder if offered, or enter the installed game folder manually. Older tools-preview assets on [GitHub Releases](https://github.com/Noa3/WarhammerSurvivorsMultiplayer/releases) do not contain the newer in-game interface. A standalone portable archive uses `WSM/Start-WSM.cmd` after extraction.
 
 Do not download just an executable. See the [distribution guide](../docs/DISTRIBUTION.md) for installation, removal and the experimental Vortex/FOMOD alternative.
+
+If you previously set the optional `WSM_GAME` environment variable and then moved the game, update or unset it before restarting the launcher. An explicit path takes precedence over Steam discovery; the launcher will not silently launch a different copy.
 
 Keep all accompanying files and subdirectories together. This is a self-contained .NET 10 Windows x64 distribution; a separate .NET SDK/runtime installation is not required for the packaged managed applications. Runtime licenses and third-party notices are included under `win-x64/licenses/` and must accompany redistribution.
 
