@@ -1,5 +1,6 @@
 #include "wsm/ingame_ui.h"
 #include "wsm/endpoint_editor.h"
+#include "wsm/portrait_layout.h"
 #include "wsm/ingame_localization.h"
 #include <commctrl.h>
 #include <windowsx.h>
@@ -44,11 +45,18 @@ struct InGameMenu::Impl {
     void* pointer_handle = nullptr;
     Il2CppObject *root = nullptr, *panel = nullptr, *tab = nullptr, *font = nullptr, *canvas = nullptr;
     float last_scale = 0;
+    bool stock_portrait_layout = false;
+    ULONGLONG next_portrait_check = 0;
     Il2CppObject *address = nullptr, *port = nullptr, *status_text = nullptr;
     Il2CppObject *address_rect = nullptr, *port_rect = nullptr;
     Il2CppObject *host_rect = nullptr, *join_rect = nullptr, *leave_rect = nullptr, *tab_rect = nullptr;
     Il2CppObject *camera_own_rect = nullptr, *camera_shared_rect = nullptr, *camera_status_text = nullptr;
     bool camera_buttons_visible = false;
+    HostRules draft_rules;
+    Il2CppObject* rules_group = nullptr;
+    std::array<Il2CppObject*, 3> rule_rects{}, rule_labels{};
+    bool rules_visible = false;
+    std::string drawn_rules_language;
     bool camera_status_initialized = false;
     Il2CppObject *local_name_text = nullptr, *names_hud = nullptr, *names_title = nullptr;
     std::array<Il2CppObject*, 9> name_rows{};
@@ -376,11 +384,12 @@ struct InGameMenu::Impl {
         bool hidden = false; set_value("active", editor.selection, &hidden); set_value("active", editor.caret, &hidden);
         return field;
     }
-    Il2CppObject* button(Il2CppObject* parent, const char* name, Text caption, Vec2 size, Vec2 pos, int font_size = 20) {
+    Il2CppObject* button(Il2CppObject* parent, const char* name, Text caption, Vec2 size, Vec2 pos, int font_size = 20, Il2CppObject** dynamic_label = nullptr) {
         auto go = make_go(name, parent, size, pos);
         auto bg = image(go, {0.22f, 0.32f, 0.42f, 1.0f});
         auto b = add_component(go, "Button"); set_ref("target_graphic", b, bg);
-        label(go, "WSM Button Text", caption, size, {0, 0}, font_size);
+        if (dynamic_label) *dynamic_label = text(go, "WSM Button Text", "", size, {0, 0}, font_size);
+        else label(go, "WSM Button Text", caption, size, {0, 0}, font_size);
         return rectangle(go);
     }
     void resolve(HMODULE game, Il2CppDomain* domain) {
@@ -481,6 +490,51 @@ struct InGameMenu::Impl {
         method("target_graphic", "Selectable", "set_targetGraphic", "System.Void", {"UnityEngine.UI.Graphic"});
         method("array_get", "Array", "GetValue", "System.Object", {"System.Int32"});
         method("array_set", "Array", "SetValue", "System.Void", {"System.Object", "System.Int32"});
+        // Optional game-specific UI; absence must not prevent using the menu.
+        try {
+            add_class(domain, "StockEquipment", "VampireSurvivors.Runtime.dll", "Wilson.UI", "WSGameEquipmentPanel");
+            method("stock_find", "GameObject", "Find", "UnityEngine.GameObject", {"System.String"}, true);
+            method("stock_component", "GameObject", "GetComponent", "UnityEngine.Component", {"System.Type"});
+            method("stock_count", "Transform", "get_childCount", "System.Int32", {});
+            method("stock_child", "Transform", "GetChild", "UnityEngine.Transform", {"System.Int32"});
+            method("stock_descendant", "Transform", "Find", "UnityEngine.Transform", {"System.String"});
+            method("stock_size", "RectTransform", "get_sizeDelta", "UnityEngine.Vector2", {});
+            method("stock_active", "GameObject", "get_activeInHierarchy", "System.Boolean", {});
+            stock_portrait_layout = true;
+        } catch (const std::runtime_error&) { /* No supported stock HUD bindings. */ }
+    }
+    void update_stock_portraits() {
+        const auto now = GetTickCount64();
+        if (!stock_portrait_layout || now < next_portrait_check) return;
+        next_portrait_check = now + 500; // Discover late spawns; never retain scene objects across ticks.
+        void* path_args[] = {string_new("/GAME UI/Canvas - Game UI/Safe area/Aspect Restricted Safe Area - New UI/View - Main Game WS - NEW/EquipmentPanelContainer")};
+        auto container = call("stock_find", nullptr, path_args);
+        if (!container) return;
+        auto group = call("transform", container);
+        auto count = static_cast<int*>(api.object_unbox(required(call("stock_count", group), "childCount")));
+        if (!count) return;
+        struct Portrait { Il2CppObject *slot, *icon; };
+        layout_stock_portraits(*count, [&](int i) -> std::optional<Portrait> {
+            void* index[] = {&i}; auto slot = call("stock_child", group, index);
+            if (!slot || api.object_get_class(slot) != classes.at("RectTransform")) return {};
+            void* type[] = {type_object("StockEquipment")};
+            auto panel_object = call("component_object", slot);
+            if (!call("stock_component", panel_object, type) || !boolean(call("stock_active", panel_object))) return {};
+            void* icon_path[] = {string_new("Horizontal Layout Group/PlayerIcon")};
+            auto icon = call("stock_descendant", slot, icon_path);
+            if (!icon || api.object_get_class(icon) != classes.at("RectTransform") ||
+                !boolean(call("stock_active", call("component_object", icon)))) return {};
+            return Portrait{slot, icon};
+        }, [&](Portrait portrait) {
+            auto size_of = [&](Il2CppObject* rect) {
+                auto boxed = required(call("stock_size", rect), "stock RectTransform.sizeDelta");
+                auto data = static_cast<Vec2*>(api.object_unbox(boxed));
+                if (!data) fail("cannot unbox stock RectTransform.sizeDelta");
+                return *data;
+            };
+            auto size = size_of(portrait.slot); const auto height = portrait_slot_height(size.y, size_of(portrait.icon).y);
+            if (height > size.y) { size.y = height; set_value("size", portrait.slot, &size); }
+        });
     }
     bool boolean(Il2CppObject* value) {
         auto object = required(value, "Boolean result"); auto c = api.object_get_class(object);
@@ -604,6 +658,13 @@ struct InGameMenu::Impl {
         set_value("active", call("component_object", camera_own_rect), &hidden);
         set_value("active", call("component_object", camera_shared_rect), &hidden);
         camera_status_text = text(panel, "WSM Camera Status", std::string(i18n::text(Text::CameraUnavailable, language)), {550, 36}, {0, -226}, 16);
+        rules_group = make_go("WSM Next Host Rules", panel, {600, 80}, {0, -285});
+        image(rules_group, {0.05f, 0.07f, 0.10f, 0.97f});
+        label(rules_group, "WSM Rules Notice", Text::RuleNotice, {580, 34}, {0, 21}, 14);
+        rule_rects[0] = button(rules_group, "WSM Bot Slots", Text::RuleBots, {130, 34}, {-225, -16}, 16, &rule_labels[0]);
+        rule_rects[1] = button(rules_group, "WSM Bot Difficulty", Text::RuleNormal, {180, 34}, {-60, -16}, 16, &rule_labels[1]);
+        rule_rects[2] = button(rules_group, "WSM Death Rule", Text::RuleAllDead, {248, 34}, {164, -16}, 15, &rule_labels[2]);
+        set_value("active", rules_group, &hidden);
         if (methods.count("rich_text")) {
             names_hud = make_go("WSM Player Names HUD", root, {320, 56}, {176, 40}, {0, 0});
             auto names_background = image(names_hud, {0.05f, 0.07f, 0.10f, 0.75f});
@@ -632,6 +693,12 @@ struct InGameMenu::Impl {
     bool click(Vec2 p, const InGameMenuActions& a) {
         if (hit(tab_rect, p) && topmost(tab_rect, p)) { set_visible(!visible); return true; }
         if (!visible) return false;
+        if (auto rect = rule_hit(p, a)) {
+            if (rect == rule_rects[0]) draft_rules.bots = (draft_rules.bots + 1) % 9;
+            else if (rect == rule_rects[1]) draft_rules.difficulty = (draft_rules.difficulty + 1) % 3;
+            else draft_rules.death = 1 - draft_rules.death;
+            drawn_rules_language.clear(); update_rules(a); return true;
+        }
         if (a.camera_mode && camera_buttons_visible) {
             if (hit(camera_own_rect, p) && topmost(camera_own_rect, p)) { a.camera_mode(a.context, false); return true; }
             if (hit(camera_shared_rect, p) && topmost(camera_shared_rect, p)) { a.camera_mode(a.context, true); return true; }
@@ -641,7 +708,12 @@ struct InGameMenu::Impl {
         status_override = Text::Count;
         if (l) { if (a.leave) a.leave(a.context); else status_override = Text::LeaveUnavailable; return true; }
         int n = get_port(); if (!n) { status_override = Text::InvalidPort; return true; }
-        if (h) { if (a.host) a.host(a.context, n); else status_override = Text::HostUnavailable; return true; }
+        if (h) {
+            if (a.host_with_rules) a.host_with_rules(a.context, n, draft_rules);
+            else if (a.host && draft_rules.defaults()) a.host(a.context, n);
+            else status_override = Text::HostUnavailable;
+            return true;
+        }
         auto ip = get_string(call("input_text_get", address));
         auto first = ip.find_first_not_of(" \t\r\n"), last = ip.find_last_not_of(" \t\r\n");
         if (first == std::string::npos) { status_override = Text::MissingAddress; return true; }
@@ -686,7 +758,11 @@ struct InGameMenu::Impl {
             candidate.push_back(static_cast<char>(text[i]));
         }
         GlobalUnlock(data);
-        if (terminated && valid) editing->editor.paste(candidate);
+        if (!terminated || !valid) return;
+        if (editing == &address_editor && candidate.find(':') != std::string::npos) {
+            std::string invite_port;
+            if (editing->editor.paste_invite(candidate, invite_port)) set_string("input_text_set", port, invite_port);
+        } else editing->editor.paste(candidate);
     }
     bool copy_endpoint() {
         if (!editing) return false;
@@ -758,14 +834,33 @@ struct InGameMenu::Impl {
             }
         }
     }
+    Il2CppObject* rule_hit(Vec2 p, const InGameMenuActions& a) {
+        if (visible && rules_visible && a.rules_editable && a.host_with_rules)
+            for (auto rect : rule_rects) if (hit(rect, p) && topmost(rect, p)) return rect;
+        return nullptr;
+    }
+    void update_rules(const InGameMenuActions& a) {
+        bool editable = a.rules_editable && a.host_with_rules;
+        if (editable != rules_visible) { set_value("active", rules_group, &editable); rules_visible = editable; }
+        if (!editable || language == drawn_rules_language) return;
+        const Text difficulties[] = {Text::RuleEasy, Text::RuleNormal, Text::RuleHard};
+        set_string("text", rule_labels[0], i18n::format(Text::RuleBots, language, {{"n", std::to_string(draft_rules.bots)}}));
+        set_string("text", rule_labels[1], std::string(i18n::text(difficulties[draft_rules.difficulty], language)));
+        set_string("text", rule_labels[2], std::string(i18n::text(draft_rules.death ? Text::RuleFirstDeath : Text::RuleAllDead, language)));
+        drawn_rules_language = language;
+    }
     void update(const InGameMenuActions& a) {
         if (GetCurrentThreadId() != thread) return;
         ensure_event_system();
         refresh_language();
+        update_rules(a);
         // Reference-size scaling keeps the same menu readable on ultrawide/4K displays.
         float scale = std::max(0.5f, std::min(integer("screen_width") / 1280.f, integer("screen_height") / 720.f));
         if (scale != last_scale) { editing = nullptr; set_value("scale_factor", canvas, &scale); last_scale = scale; }
         update_names(a);
+        optional_portrait_update([&] { update_stock_portraits(); }, [](const std::exception& e) {
+            OutputDebugStringA("WSM stock portraits: "); OutputDebugStringA(e.what()); OutputDebugStringA("\n");
+        });
         std::string current = status_override == Text::Count ? (a.status ? a.status(a.context, language) : std::string(i18n::text(Text::NotConnected, language))) : std::string(i18n::text(status_override, language));
         if (current != last_status) { set_string("text", status_text, current); last_status = current; }
         const bool camera_available = a.camera_mode != nullptr;
@@ -809,7 +904,7 @@ struct InGameMenu::Impl {
                     pressed_rect = hit(tab_rect, point) && topmost(tab_rect, point) ? tab_rect : visible && hit(host_rect, point) && topmost(host_rect, point) ? host_rect :
                         visible && hit(join_rect, point) && topmost(join_rect, point) ? join_rect : visible && hit(leave_rect, point) && topmost(leave_rect, point) ? leave_rect :
                         visible && camera_buttons_visible && a.camera_mode && hit(camera_own_rect, point) && topmost(camera_own_rect, point) ? camera_own_rect :
-                        visible && camera_buttons_visible && a.camera_mode && hit(camera_shared_rect, point) && topmost(camera_shared_rect, point) ? camera_shared_rect : nullptr;
+                        visible && camera_buttons_visible && a.camera_mode && hit(camera_shared_rect, point) && topmost(camera_shared_rect, point) ? camera_shared_rect : rule_hit(point, a);
                 } else {
                     auto pressed = pressed_rect; pressed_rect = nullptr;
                     if (pressed && (pressed == tab_rect || visible) && hit(pressed, point)) click(point, a);

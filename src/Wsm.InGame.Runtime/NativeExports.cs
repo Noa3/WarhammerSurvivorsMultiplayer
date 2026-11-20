@@ -11,7 +11,7 @@ namespace Wsm.InGame.Runtime;
 /// caller memory, never lets an exception cross the ABI, and returns immediately: session work
 /// happens on background tasks so the Unity main thread is never blocked.
 /// </summary>
-public static class NativeExports
+public static partial class NativeExports
 {
     /// <summary>Accepted by the command exports: the request was queued, not completed.</summary>
     public const int Accepted = 0;
@@ -26,7 +26,7 @@ public static class NativeExports
 
     private enum CommandKind { Host, Join }
 
-    private readonly record struct Command(CommandKind Kind, int Port, bool LanBind, string Address, string Name, long Generation, CancellationToken Cancellation);
+    private readonly record struct Command(CommandKind Kind, int Port, bool LanBind, string Address, string Name, long Generation, CancellationToken Cancellation, SessionSettings? HostSettings = null);
 
     private static readonly IngameSessionController Controller = new();
     internal static IngameSessionController ControllerForTests => Controller;
@@ -116,7 +116,9 @@ public static class NativeExports
 
     /// <summary>Starts hosting in the current process. port 0 binds an ephemeral port.</summary>
     [UnmanagedCallersOnly(EntryPoint = "wsm_ingame_host", CallConvs = [typeof(CallConvCdecl)])]
-    public static int Host(int port, int lanBind)
+    public static int Host(int port, int lanBind) => QueueHost(port, lanBind, null);
+
+    private static int QueueHost(int port, int lanBind, SessionSettings? settings)
     {
         try
         {
@@ -124,7 +126,10 @@ public static class NativeExports
             if (port is < 0 or > 65535 || lanBind is not (0 or 1)) return InvalidArgument;
             EnsureWorker();
             lock (CommandGate)
-                return Queue.Writer.TryWrite(new Command(CommandKind.Host, port, lanBind == 1, "", desiredName, commandGeneration, commandCancellation.Token)) ? Accepted : QueueFull;
+            {
+                if (settings is not null && Controller.Status.State is IngameState.Hosting or IngameState.Connecting or IngameState.Connected) return Unavailable;
+                return Queue.Writer.TryWrite(new Command(CommandKind.Host, port, lanBind == 1, "", desiredName, commandGeneration, commandCancellation.Token, settings)) ? Accepted : QueueFull;
+            }
         }
         catch { return Unavailable; }
     }
@@ -201,6 +206,14 @@ public static class NativeExports
     public static unsafe int Status(byte* buffer, int capacity)
     {
         try { return WriteUtf8(StatusPayload(), buffer, capacity); }
+        catch { return Unavailable; }
+    }
+
+    /// <summary>Local display only. Empty for guests, loopback hosts and sessions without a LAN candidate.</summary>
+    [UnmanagedCallersOnly(EntryPoint = "wsm_ingame_lan_hint", CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe int LanHint(byte* buffer, int capacity)
+    {
+        try { return WriteUtf8(Volatile.Read(ref namesSuppressed) != 0 ? [] : Controller.LanHint, buffer, capacity); }
         catch { return Unavailable; }
     }
 
@@ -313,7 +326,7 @@ public static class NativeExports
                         if (command.Generation != commandGeneration) continue;
                         Volatile.Write(ref namesSuppressed, 0);
                         operation = command.Kind == CommandKind.Host
-                            ? Controller.HostAsync(command.Port, command.LanBind, command.Cancellation, command.Name)
+                            ? Controller.HostAsync(command.Port, command.LanBind, command.Cancellation, command.Name, command.HostSettings)
                             : Controller.JoinAsync(command.Address, command.Port, command.Cancellation, command.Name);
                     }
                     await operation.ConfigureAwait(false);

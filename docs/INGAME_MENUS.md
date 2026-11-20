@@ -2,7 +2,11 @@
 
 **The current connection preview adds a native Co-op [F6] panel inside the game.** Host, IP/port Join and Leave use a network runtime in the game process. The panel follows the selected game language. It does not start a shared multiplayer run.
 
-Start `distribution/win-x64/Start-WSM.cmd` from a complete checkout. Enter your installed game folder, read the save warning and confirm. F6 hides/reopens the panel without leaving; Leave explicitly ends membership. Endpoints are IPv4 literals. Text editing is owned by the panel rather than vanilla menu selection; it supports select-all, cursor/selection movement, deletion and copy/paste.
+Start `distribution/win-x64/Start-WSM.cmd` from an extracted checkout. Back up valuable saves first: the installation copy uses your normal saves and Steam Cloud. Once you accept the warning, confirm the detected Steam installation if offered, or enter the installed game folder yourself.
+
+1. **Host:** Open **Co-op [F6]**. If bot and defeat settings are shown, choose them before selecting **Host**. Share the displayed LAN address and port with your friend. If none is shown, use the host's IPv4 address on your shared LAN or VPN and the selected port (default `7780`).
+2. **Guest:** Open the same panel. Enter the host's address and port, then select **Join**. Builds with invitation paste can fill both fields when you paste `IPv4:port` into the address field. A guest on another PC must not use `127.0.0.1`.
+3. **Either player:** F6 hides or reopens the panel without disconnecting. **Leave** ends your membership. A successful connection does not start a shared run or spawn bot characters.
 
 In-game edited endpoints, Host/Join/Leave, separate real test peers and normal exit have been exercised on loopback. Two-computer LAN operation and gameplay input isolation remain separate acceptance gates. Do not assume opening this panel pauses combat or blocks every raw input consumer. See [interface language](LOCALIZATION.md) for font limits.
 

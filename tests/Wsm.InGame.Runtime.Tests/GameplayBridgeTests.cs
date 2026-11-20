@@ -402,10 +402,7 @@ internal static class GameplayBridgeTests
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
         var client = (SessionClient)sessionField.GetValue(guest)!.GetType().GetProperty("Client")!.GetValue(sessionField.GetValue(guest)!)!;
 
-        // Deterministic producer/consumer imbalance: the bridge refuses to read its reward
-        // channel in 500 ms slices while the host pushes as fast as the transport allows, so the
-        // guest's 128-entry Core reward channel is guaranteed to fill while the consumer is
-        // stalled. The assertion below is the ledger's content, not a clock.
+        // Delay bridge reads while the transport receives a burst larger than the old queue.
         var stalled = true;
         guest.StallGameplayChannelForTests = name => name == "rewards" && stalled
             ? TimeSpan.FromMilliseconds(500) : TimeSpan.Zero;
@@ -428,30 +425,17 @@ internal static class GameplayBridgeTests
         }
         Require(pushed == total, $"host pushed only {pushed} of {total} rewards");
 
-        // While the consumer is stalled, Core must still be able to accept receipts beyond its
-        // bounded channel, and that must not be treated as a transport error.
         var ledgerDeadline = Environment.TickCount64 + 12000;
-        while (client.ReceivedRewards.Length <= 128 && Environment.TickCount64 < ledgerDeadline) await Task.Delay(20);
-        var stalledLedger = client.ReceivedRewards.Select(r => r.ReceiptId).ToHashSet();
-        Require(stalledLedger.Count > 128,
-            $"Core must accept receipts beyond its 128-entry channel under a stalled pump, saw {stalledLedger.Count}");
-        // Give any transport tear-down caused by the overflow time to publish before judging.
-        await Task.Delay(1500);
-        // The frozen Core contract requires a full notification channel to fail the client
-        // clearly (Wsm.Core.Tests EncounterRegression: "client overflow must fail clearly").
-        // Reliability therefore lives in the durable ledger plus adapter reconciliation, so the
-        // invariant judged below is loss-freedom, not session survival: whether the session is
-        // still connected or already retained, every receipt Core accepted must still reach the
-        // native consumer exactly once.
+        while (client.ReceivedRewardCount < total && Environment.TickCount64 < ledgerDeadline) await Task.Delay(20);
+        Require(client.ReceivedRewardCount == total && client.Progression.Xp == total && guest.Status.State == IngameState.Connected,
+            $"guest must stay connected and receive all {total} XP; got {client.ReceivedRewardCount}");
         stalled = false;
 
         // Once the consumer resumes, every receipt Core accepted has to arrive exactly once.
         var delivered = new HashSet<Guid>();
         var drainDeadline = Environment.TickCount64 + 30000;
-        var expected = stalledLedger.Count;
-        while (delivered.Count < expected && Environment.TickCount64 < drainDeadline)
+        while (delivered.Count < total && Environment.TickCount64 < drainDeadline)
         {
-            expected = Math.Max(expected, client.ReceivedRewards.Length);
             if (guest.PollGameplay(Span<byte>.Empty) == 0) { await Task.Delay(5); continue; }
             var written = guest.PollGameplay(buffer);
             if (written <= 0) { await Task.Delay(5); continue; }

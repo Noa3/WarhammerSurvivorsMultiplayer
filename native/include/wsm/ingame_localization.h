@@ -14,7 +14,8 @@ enum class Text {
     Connecting, Connected, HostLost, Refused, Timeout, Rejected, HostFull,
     Unreachable, PortInUse, Busy, Invalid, Internal, UiError,
     CameraOwn, CameraShared, CameraInactive, CameraActive, CameraSpectating, CameraUnavailable,
-    LocalPlayerName, PlayerNames, PlayerFallback, Count
+    LocalPlayerName, PlayerNames, PlayerFallback,
+    RuleBots, RuleEasy, RuleNormal, RuleHard, RuleAllDead, RuleFirstDeath, RuleNotice, Count
 };
 
 std::string normalize_language(std::string_view code);

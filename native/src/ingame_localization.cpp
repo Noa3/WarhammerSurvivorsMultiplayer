@@ -42,6 +42,21 @@ constexpr std::array<std::array<std::string_view, 3>, 13> name_catalog = {{
     {{"Ви: {name}", "Гравці", "Гравець"}}
 }};
 // Rows follow Text exactly; values remain static for the lifetime of the process.
+constexpr std::array<std::array<std::string_view, 7>, 13> rule_catalog = {{
+    {{"Bot slots: {n}", "Bots: Easy", "Bots: Normal", "Bots: Hard", "End when all die", "End on first death", "Next lobby only. These rules do not spawn game characters."}},
+    {{"Bot-Plätze: {n}", "Bots: Leicht", "Bots: Normal", "Bots: Schwer", "Ende, wenn alle sterben", "Ende beim ersten Tod", "Nur für die nächste Lobby. Diese Regeln erzeugen keine Spielfiguren."}},
+    {{"Places bots : {n}", "Bots : facile", "Bots : normal", "Bots : difficile", "Fin à la mort de tous", "Fin au premier mort", "Prochain salon uniquement. Ces règles ne créent pas de personnages."}},
+    {{"Posti bot: {n}", "Bot: facile", "Bot: normale", "Bot: difficile", "Fine quando muoiono tutti", "Fine alla prima morte", "Solo per la prossima lobby. Queste regole non generano personaggi."}},
+    {{"Plazas de bot: {n}", "Bots: fácil", "Bots: normal", "Bots: difícil", "Fin cuando mueran todos", "Fin con la primera muerte", "Solo para la próxima sala. Estas reglas no generan personajes."}},
+    {{"ボット枠：{n}", "ボット：簡単", "ボット：普通", "ボット：難しい", "全員死亡で終了", "最初の死亡で終了", "次のロビーの設定です。この設定だけではキャラクターは出現しません。"}},
+    {{"봇 슬롯: {n}", "봇: 쉬움", "봇: 보통", "봇: 어려움", "전원 사망 시 종료", "첫 사망 시 종료", "다음 로비에만 적용됩니다. 이 규칙으로 게임 캐릭터가 생성되지는 않습니다."}},
+    {{"Miejsca botów: {n}", "Boty: łatwe", "Boty: normalne", "Boty: trudne", "Koniec po śmierci wszystkich", "Koniec po pierwszej śmierci", "Tylko następne lobby. Te zasady nie tworzą postaci w grze."}},
+    {{"Vagas de bot: {n}", "Bots: fácil", "Bots: normal", "Bots: difícil", "Fim quando todos morrerem", "Fim na primeira morte", "Só para a próxima sala. Estas regras não geram personagens."}},
+    {{"Мест для ботов: {n}", "Боты: легко", "Боты: обычно", "Боты: сложно", "Конец при гибели всех", "Конец при первой смерти", "Только для следующего лобби. Эти правила не создают персонажей."}},
+    {{"机器人位：{n}", "机器人：简单", "机器人：普通", "机器人：困难", "全员死亡时结束", "首次死亡时结束", "仅用于下一个大厅。这些规则不会生成游戏角色。"}},
+    {{"Bot yuvası: {n}", "Botlar: kolay", "Botlar: normal", "Botlar: zor", "Herkes ölünce bitir", "İlk ölümde bitir", "Yalnızca sonraki lobi için. Bu kurallar oyunda karakter oluşturmaz."}},
+    {{"Місця ботів: {n}", "Боти: легко", "Боти: звичайно", "Боти: складно", "Кінець після загибелі всіх", "Кінець після першої смерті", "Лише для наступного лобі. Ці правила не створюють ігрових персонажів."}}
+}};
 constexpr std::array<Row, 13> catalog = {{
 {{"Co-op [F6]", "Co-op connection", "IP address", "Port", "Host", "Join", "Leave",
   "Trusted LAN/VPN only. Lobby preview; co-op gameplay is not available yet.",
@@ -231,6 +246,8 @@ std::string_view text(Text id, std::string_view language) {
     const auto lookup = [&](std::size_t row) {
         if (index < count) return catalog[row][index];
         const auto names = static_cast<std::size_t>(Text::LocalPlayerName);
+        const auto rules = static_cast<std::size_t>(Text::RuleBots);
+        if (index >= rules) return rule_catalog[row][index - rules];
         return index < names ? camera_catalog[row][index - count] : name_catalog[row][index - names];
     };
     for (std::size_t i = 0; i < languages.size(); ++i)

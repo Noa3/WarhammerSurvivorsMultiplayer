@@ -6,7 +6,7 @@ using Wsm.Contracts;
 
 namespace Wsm.Core;
 
-public sealed class SessionHost : IAsyncDisposable
+public sealed partial class SessionHost : IAsyncDisposable
 {
     public const int ProtocolVersion = 5;
     public Encounter Encounter { get; } = new();
@@ -135,7 +135,10 @@ public sealed class SessionHost : IAsyncDisposable
             finally { slots.Release(); }
         }
     }
-    public async Task PublishSnapshotAsync(WorldSnapshot snapshot, CancellationToken token = default)
+    public Task PublishSnapshotAsync(WorldSnapshot snapshot, CancellationToken token = default)
+        => PublishSnapshotCoreAsync(snapshot, null, token);
+
+    private async Task PublishSnapshotCoreAsync(WorldSnapshot snapshot, IReadOnlyDictionary<string, string>? xpByBot, CancellationToken token)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         if (snapshot.Enemies is not { Length: 0 }) throw new ArgumentException("Enemy health is host encounter state, not caller snapshot data.", nameof(snapshot));
@@ -145,9 +148,12 @@ public sealed class SessionHost : IAsyncDisposable
             if (snapshot.Tick <= lastSnapshotTick) throw new ArgumentException("Snapshot tick must increase.", nameof(snapshot));
             snapshot = snapshot with { Enemies = Encounter.Snapshot() };
             if (!snapshot.Valid) throw new ArgumentException("Invalid snapshot.", nameof(snapshot));
+            var steps = PlanBots(snapshot, xpByBot);
+            if (steps.Length != 0) snapshot = snapshot with { Entities = [.. snapshot.Entities, .. steps.Select(s => s.Actor)] };
             var bytes = Peer.Encode(new Message("snapshot", Snapshot: snapshot));
             token.ThrowIfCancellationRequested();
             foreach (var peer in peers.Values) peer.Enqueue(bytes);
+            CommitBotSteps(steps);
             lastSnapshotTick = snapshot.Tick;
         }
         await Task.CompletedTask;

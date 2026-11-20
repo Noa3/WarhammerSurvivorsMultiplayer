@@ -79,8 +79,24 @@ static void aliases() {
     require(e.begin(std::string_view(e.text()).substr(1)), "alias begin"); state(e, ".", 1, 0);
     require(e.character(U'.'), "same replacement changes selection"); state(e, ".", 1, 1);
 }
+static void invite_paste() {
+    EndpointEditor a(EndpointKind::Address);
+    std::string port = "7780";
+    require(a.begin("127.0.0.1"), "select old IP");
+    require(a.paste_invite("192.168.1.22:9000", port), "paste host invite into address field");
+    state(a, "192.168.1.22", 12, 12);
+    require(port == "9000", "invite replaces port");
+    for (auto bad : {"10.0.0:1", "999.1.2.3:1", "10.1.2.3:0", "1.2.3.4:65536", "1.2.3.4:23x", "1.2.3.4::5", "01.2.3.4:9", "1.2.3.4:", ":9"}) {
+        require(!a.paste_invite(bad, port), "reject invalid host invite");
+        state(a, "192.168.1.22", 12, 12); require(port == "9000", "bad invite cannot change port");
+    }
+    require(a.paste_invite("10.0.0.7:65535", port), "invite replaces both fields regardless of caret");
+    require(port == "65535" && a.text() == "10.0.0.7", "max port");
+    require(a.key(EditKey::SelectAll) && a.paste_invite("127.0.0.1", port), "plain IP remains normal paste");
+    require(a.text() == "127.0.0.1" && port == "65535", "plain IP preserves port");
+}
 int main() {
-    using Test = void (*)(); const Test tests[] = {empty, typing_and_reset, selection_replacement, invalid_atomic, capacity, navigation, deletion, control_words, aliases};
+    using Test = void (*)(); const Test tests[] = {empty, typing_and_reset, selection_replacement, invalid_atomic, capacity, navigation, deletion, control_words, aliases, invite_paste};
     for (auto test : tests) test();
     std::printf("PASS: %zu endpoint editor test cases\n", sizeof(tests) / sizeof(tests[0]));
 }

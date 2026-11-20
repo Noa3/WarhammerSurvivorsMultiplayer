@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <charconv>
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -38,6 +39,33 @@ public:
         const std::string insertion(value);
         text_.replace(lo, hi - lo, insertion);
         cursor_ = anchor_ = lo + insertion.size();
+        return true;
+    }
+
+    bool paste_invite(std::string_view value, std::string& port) {
+        const auto split = value.find(':');
+        if (split == std::string_view::npos) return paste(value);
+        if (kind_ != EndpointKind::Address || value.size() > 21) return false;
+        auto address = value.substr(0, split);
+        auto service = value.substr(split + 1);
+        const auto decimal = [](std::string_view word, unsigned max, bool allow_zero) {
+            if (word.empty() || (word.size() > 1 && word.front() == '0')) return false;
+            unsigned n = 0;
+            const auto [end, error] = std::from_chars(word.data(), word.data() + word.size(), n);
+            return error == std::errc{} && end == word.data() + word.size() && n <= max && (allow_zero || n != 0);
+        };
+        if (!decimal(service, 65535, false)) return false;
+        auto tail = address;
+        for (int i = 0; i < 4; ++i) {
+            const auto dot = tail.find('.');
+            if ((dot == std::string_view::npos) != (i == 3) || !decimal(tail.substr(0, dot), 255, true)) return false;
+            if (i != 3) tail.remove_prefix(dot + 1);
+        }
+        // An invite replaces both fields; partial plain-text pastes still edit the selection.
+        std::string new_port(service);
+        text_ = std::string(address);
+        cursor_ = anchor_ = text_.size();
+        port.swap(new_port);
         return true;
     }
 

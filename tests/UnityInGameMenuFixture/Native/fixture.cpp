@@ -46,6 +46,11 @@ std::string player_names(void*, const std::string&) {
     return "Fixture Captain\nRune <b>Hunter</b>";
 }
 wsm::InGameMenuActions actions{nullptr, host, join, leave, status, camera_mode, camera_status, local_name, player_names};
+int rules_hosts = 0;
+wsm::HostRules last_rules;
+void record_rules(void*, int port, wsm::HostRules rules) {
+    ++rules_hosts; last_port = port; last_rules = rules;
+}
 BOOL CALLBACK find_window(HWND hwnd, LPARAM p) {
     DWORD pid = 0; GetWindowThreadProcessId(hwnd, &pid);
     wchar_t cls[128]{};
@@ -101,5 +106,12 @@ extern "C" __declspec(dllexport) void __cdecl fixture_input(int foreground, int 
 extern "C" __declspec(dllexport) int __cdecl fixture_click(float x, float y) { return menu.test_click(x, y, actions) ? 1 : 0; }
 extern "C" __declspec(dllexport) int __cdecl fixture_count(int i) { return i >= 0 && i < 5 ? counts[i] : -1; }
 extern "C" __declspec(dllexport) int __cdecl fixture_port() { return last_port; }
+extern "C" __declspec(dllexport) void __cdecl fixture_rules_editable(int editable) {
+    actions.host_with_rules = record_rules; actions.rules_editable = editable != 0;
+}
+extern "C" __declspec(dllexport) int __cdecl fixture_rules_receipt(int* bots, int* difficulty, int* death) {
+    *bots = last_rules.bots; *difficulty = last_rules.difficulty; *death = last_rules.death;
+    return rules_hosts;
+}
 extern "C" __declspec(dllexport) int __cdecl fixture_address_is(const char* s) { return s && last_address == s; }
 extern "C" __declspec(dllexport) void __cdecl fixture_shutdown() { menu.shutdown(); if (tick_event) { CloseHandle(tick_event); tick_event = nullptr; } }

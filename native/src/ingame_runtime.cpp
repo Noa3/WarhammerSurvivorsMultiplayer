@@ -10,7 +10,7 @@ bool valid_utf8(const std::string& value) {
     return value.empty() || MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
         static_cast<int>(value.size()), nullptr, 0) > 0;
 }
-std::string read_names(int (__cdecl* read)(unsigned char*, int), int limit) {
+std::string read_text(int (__cdecl* read)(unsigned char*, int), int limit) {
     if (!read) return {};
     std::array<unsigned char, 4097> buffer;
     buffer.fill(0x7f);
@@ -51,6 +51,8 @@ bool InGameRuntime::load(const std::wstring& path, std::string& error) {
         error = "Networking runtime ABI is missing or incompatible; restart after correcting installation."; return false;
     }
     // Additive ABI-1 exports; older backends retain the original five-export contract.
+    host_rules_ = reinterpret_cast<decltype(host_rules_)>(GetProcAddress(loaded, "wsm_ingame_host_rules"));
+    lan_hint_ = reinterpret_cast<decltype(lan_hint_)>(GetProcAddress(loaded, "wsm_ingame_lan_hint"));
     state_ = reinterpret_cast<decltype(state_)>(GetProcAddress(loaded, "wsm_ingame_state"));
     peer_count_ = reinterpret_cast<decltype(peer_count_)>(GetProcAddress(loaded, "wsm_ingame_peer_count"));
     bound_port_ = reinterpret_cast<decltype(bound_port_)>(GetProcAddress(loaded, "wsm_ingame_bound_port"));
@@ -66,6 +68,17 @@ int InGameRuntime::host(int port, bool lan) {
     if (port < 0 || port > 65535) return -1;
     return host_(port, lan ? 1 : 0);
 }
+bool InGameRuntime::can_edit_host_rules() const {
+    if (!ready() || !host_rules_ || !state_) return false;
+    const int state = state_();
+    return state == 0 || state == 4;
+}
+int InGameRuntime::host(int port, bool lan, HostRules rules) {
+    if (!rules.valid() || port < 0 || port > 65535) return -1;
+    if (!host_rules_) return rules.defaults() ? host(port, lan) : -2;
+    if (!can_edit_host_rules()) return -2;
+    return host_rules_(port, lan ? 1 : 0, rules.bots, rules.difficulty, rules.death);
+}
 int InGameRuntime::join(const std::string& address, int port) {
     if (!ready()) return -3;
     if (address.empty() || address.size() > 15 || port < 1 || port > 65535) return -1;
@@ -79,17 +92,19 @@ int InGameRuntime::set_player_name(const std::string& name) {
     if (name.empty() || name.size() > 4096 || name.find('\0') != std::string::npos || !valid_utf8(name)) return -1;
     return set_player_name_(reinterpret_cast<const unsigned char*>(name.data()), static_cast<int>(name.size()));
 }
-std::string InGameRuntime::local_player_name() const { return names_ready() ? read_names(local_player_name_, 192) : std::string{}; }
-std::string InGameRuntime::player_names() const { return names_ready() ? read_names(player_names_, 4096) : std::string{}; }
-std::string InGameRuntime::localized_status(const std::string& language, bool lan) const {
+std::string InGameRuntime::local_player_name() const { return names_ready() ? read_text(local_player_name_, 192) : std::string{}; }
+std::string InGameRuntime::player_names() const { return names_ready() ? read_text(player_names_, 4096) : std::string{}; }
+std::string InGameRuntime::localized_status(const std::string& language, bool lan, bool command_failed) const {
     using i18n::Text;
     const auto phrase = [&](Text id) { return std::string(i18n::text(id, language)); };
     if (!ready()) return phrase(Text::NetworkMissing);
-    if (!state_ || !peer_count_ || !bound_port_ || !last_error_) return phrase(Text::NetworkUnavailable);
+    if (!state_ || !peer_count_ || !bound_port_ || !last_error_)
+        return phrase(command_failed ? Text::ActionRejected : Text::NetworkUnavailable);
     const int state = state_();
     std::array<unsigned char, 32> error{};
     const int size = last_error_(error.data(), static_cast<int>(error.size()));
     const int port = bound_port_(), peers = peer_count_();
+    const auto hint = state == 1 && lan ? read_text(lan_hint_, 44) : std::string{};
     // The ABI getters are separate reads; reject an observed state transition
     // rather than presenting details from a different state as authoritative.
     if (size < 0 || size >= static_cast<int>(error.size()) || error[size] != 0 ||
@@ -98,11 +113,13 @@ std::string InGameRuntime::localized_status(const std::string& language, bool la
     if (state == 1) {
         if (port < 1 || port > 65535 || peers < 0 || peers > 3) return phrase(Text::NetworkUnavailable);
         return i18n::format(lan ? Text::HostingLan : Text::HostingLocal, language,
-                            {{"port", std::to_string(port)}, {"peers", std::to_string(peers)}});
+                            {{"port", std::to_string(port)}, {"peers", std::to_string(peers)}}) +
+               (hint.empty() ? "" : "\n" + hint);
     }
     if (state == 2) return phrase(Text::Connecting);
     if (state == 3) return phrase(Text::Connected);
-    if (code.empty() && state == 0) return phrase(Text::NotConnected);
+    // A refused button press does not replace an active session or a specific transport error.
+    if (code.empty() && state == 0) return phrase(command_failed ? Text::ActionRejected : Text::NotConnected);
     const std::pair<const char*, Text> failures[] = {
         {"hostlost", Text::HostLost}, {"refused", Text::Refused}, {"timeout", Text::Timeout},
         {"rejected", Text::Rejected}, {"hostfull", Text::HostFull}, {"unreachable", Text::Unreachable},

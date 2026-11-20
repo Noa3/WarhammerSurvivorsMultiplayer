@@ -7,6 +7,18 @@ var count = 0;
 var skipped = 0;
 try
 {
+    Run("Steam default and alternate libraries, including legacy VDF", () => SteamDirectoryRegression.Libraries(root));
+    Run("Steam selection, explicit overrides, missing Steam and cancellation", () => SteamDirectoryRegression.Selection(root));
+    if (OperatingSystem.IsWindows())
+        Run("portable play rejects an invalid explicit folder literally", () =>
+        {
+            var missing = Path.Combine(root, "missing & echo %PATH% ! ^ (x)");
+            var info = new System.Diagnostics.ProcessStartInfo("dotnet") { RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false };
+            info.Environment["WSM_GAME"] = missing;
+            foreach (var arg in new[] { typeof(GameInspection).Assembly.Location, "play-installed" }) info.ArgumentList.Add(arg);
+            using var process = System.Diagnostics.Process.Start(info)!;
+            Check(process.WaitForExit(5000) && process.ExitCode == 1 && process.StandardError.ReadToEnd().Contains(missing), "invalid override was not rejected literally");
+        });
     Run("startup upgrade profile rejects invalid inputs without mutation", () => StartupUpgradeProfileRegression.Run(root));
     Run("play child environment isolates activation and inherited test signals", () =>
     {

@@ -42,7 +42,7 @@ static class EncounterRegression
         try { await peer.ReadAsync(timeout.Token); throw new Exception("client reward frame accepted"); } catch (EndOfStreamException) { }
         Check(a.Progression.Xp == 25 && b.Progression.Xp == 0, "spoof did not alter rewards");
         await SpoofedHostRecipient(timeout.Token);
-        await ClientOverflow(timeout.Token);
+        await PersonalXpBurst(timeout.Token);
     }
     private static async Task SpoofedHostRecipient(CancellationToken token)
     {
@@ -63,19 +63,24 @@ static class EncounterRegression
         }
         finally { listener.Stop(); }
     }
-    private static async Task ClientOverflow(CancellationToken token)
+    private static async Task PersonalXpBurst(CancellationToken token)
     {
         await using var host = new SessionHost(new(2, DeathMode.AllDead, 0, BotDifficulty.Normal), "x"); host.Start();
         await using var client = await SessionClient.ConnectAsync(IPAddress.Loopback, host.Port, "x", token);
         await host.Joined.ReadAsync(token);
+        var pending = new List<RewardReceipt>();
         for (int i = 0; i < 129; i++)
         {
-            host.PublishReward(client.PlayerId, new(Guid.NewGuid(), client.PlayerId, RewardKind.Item, 1, "item"));
-            while (client.ReceivedRewards.Length < i + 1) await Task.Delay(1, token);
+            var reward = new RewardReceipt(Guid.NewGuid(), client.PlayerId, RewardKind.Xp, 2);
+            pending.Add(reward);
+            host.PublishReward(client.PlayerId, reward);
+            // Wait for the TCP reader, but don't drain the notification queue during the burst.
+            while (client.ReceivedRewardCount < pending.Count) await Task.Delay(1, token);
         }
-        Exception? failure = null;
-        try { await client.Snapshots.Completion.WaitAsync(token); } catch (Exception ex) { failure = ex; }
-        Check(failure is InvalidDataException && failure.Message.Contains("Reward channel full"), "client overflow must fail clearly");
-        Check(client.ReceivedRewards.Length == 129, "overflow receipt remains in private store");
+        await host.PublishSnapshotAsync(new(1, []), token);
+        Check((await client.Snapshots.ReadAsync(token)).Tick == 1, "world still arrives while XP consumer is paused");
+        foreach (var expected in pending)
+            Check(await client.Rewards.ReadAsync(token) == expected, "ordered personal receipt missing");
+        Check(client.Progression.Xp == 2L * pending.Count && !client.Rewards.TryRead(out _), "XP received exactly once");
     }
 }

@@ -6,7 +6,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-public sealed class MenuFixture : MonoBehaviour
+public sealed partial class MenuFixture : MonoBehaviour
 {
     [DllImport("ingame_ui_fixture", CallingConvention = CallingConvention.Cdecl)] static extern int fixture_init();
     [DllImport("ingame_ui_fixture", CallingConvention = CallingConvention.Cdecl)] static extern void fixture_tick();
@@ -76,6 +76,12 @@ public sealed class MenuFixture : MonoBehaviour
         Check("native_init", initialized == 0);
         if (initialized != 0) { Finish(); yield break; }
         for (int i = 0; i < 5; ++i) { fixture_tick(); yield return null; }
+        if (Array.IndexOf(Environment.GetCommandLineArgs(), "--host-rules") >= 0) {
+            yield return RunHostRules();
+            fixture_shutdown(); yield return null;
+            Check("rules_shutdown", !GameObject.Find("WSM Coop Canvas"));
+            Finish(); yield break;
+        }
         if (Array.IndexOf(Environment.GetCommandLineArgs(), "--os-input-test") >= 0) {
             if (Environment.GetEnvironmentVariable("WSM_MENU_MODAL") == "1") {
                 var modal = new GameObject("Fixture Higher Modal", typeof(RectTransform), typeof(Canvas), typeof(GraphicRaycaster), typeof(Image));

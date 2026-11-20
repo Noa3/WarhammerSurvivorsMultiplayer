@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,18 +12,27 @@ TEMPLATE = ROOT / 'tools/package-templates/Start-WSM.cmd'
 PACKAGE = Path(os.environ['WSM_PACKAGE_TEST_DIR']) if os.environ.get('WSM_PACKAGE_TEST_DIR') else None
 
 
+def run_start(directory, keys, **environment):
+    # Fixed command source even when the package or user input contains cmd metacharacters.
+    return subprocess.run(['cmd.exe', '/d', '/v:off', '/c', 'Start-WSM.cmd'], cwd=directory,
+                          env={**os.environ, **environment}, input=keys, capture_output=True,
+                          text=True, errors='replace', timeout=15)
+
+
 class EntryPointTests(unittest.TestCase):
     def test_template_exists_and_declines_by_default(self):
         self.assertTrue(TEMPLATE.is_file(), 'Missing extract-and-run entry point')
         text = TEMPLATE.read_text(encoding='utf-8').lower()
-        for fragment in ('disabledelayedexpansion', 'steam cloud', 'saves', 'choice', '/d n', 'wsm.launcher.exe', 'play', 'wsm.bridge.dll', 'localappdata'):
-            self.assertIn(fragment, text)
+        self.assertIn('/c yn /n /d n /t 60', text)
 
-    def test_blank_game_directory_exits_without_launch(self):
-        self.assertTrue(TEMPLATE.is_file(), 'Missing extract-and-run entry point')
-        result = subprocess.run(['cmd.exe', '/d', '/c', str(TEMPLATE)], input='\n', text=True, capture_output=True, timeout=15)
-        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertNotIn('Owned game PID:', result.stdout)
+    def test_no_or_no_consent_exits_before_launcher(self):
+        for keys in ('N', '\n', ''):
+            with self.subTest(keys=keys):
+                result = run_start(TEMPLATE.parent, keys, WSM_GAME='invalid')
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn('Continue with non-isolated saves and Steam Cloud?', result.stdout)
+                self.assertNotIn('Launcher exited', result.stdout)
+                self.assertNotIn('Owned game PID:', result.stdout)
 
 
 @unittest.skipUnless(PACKAGE, 'Set WSM_PACKAGE_TEST_DIR to the actual completed package')
@@ -59,21 +69,38 @@ class DistributionTests(unittest.TestCase):
         self.assertEqual(before, (PACKAGE / 'package-manifest.json').read_bytes())
 
     def test_launcher_receives_untrusted_path_as_data(self):
-        # Exercise the same fixed PowerShell command with the real published launcher,
-        # but point it at a non-existent directory; never launch a game.
-        line = next(x for x in TEMPLATE.read_text(encoding='utf-8').splitlines() if x.startswith('powershell.exe '))
-        script = line.split(' -Command ', 1)[1]
-        self.assertTrue(script.startswith('"') and script.endswith('"'))
-        game = str(PACKAGE / 'nonexistent & echo WSM_INJECTION_TEST!')
-        env = os.environ.copy()
-        env.update(WSM_ROOT=str(PACKAGE), WSM_GAME=game)
-        result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script[1:-1]], env=env, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30)
+        game = str(PACKAGE.resolve() / 'nonexistent %PATH% ^ & echo WSM_INJECTION_TEST!')
+        result = run_start(PACKAGE, 'Y', WSM_GAME=game, WSM_STEAM_ROOT='invalid')
         combined = result.stdout + result.stderr
         self.assertEqual(result.returncode, 1, combined)
         self.assertIn('WSM:', combined)
-        self.assertIn('nonexistent & echo WSM_INJECTION_TEST!', combined)
+        self.assertIn(game, combined)
         self.assertNotIn('\nWSM_INJECTION_TEST!', combined)
         self.assertNotIn('Owned game PID:', combined)
+
+    def test_no_game_after_consent_cancels(self):
+        result = run_start(PACKAGE, 'Y', WSM_GAME='', WSM_STEAM_ROOT='invalid')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('Game not found in Steam', result.stdout)
+        self.assertNotIn('Owned game PID:', result.stdout)
+
+    def test_alternate_library_detected_without_accepting_target(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            apps = root / 'steamapps'
+            apps.mkdir()
+            library = root / 'Games & 100% !'
+            game = library / 'steamapps/common/Warhammer Survivors'
+            metadata = game / 'WarhammerSurvivors_Data/il2cpp_data/Metadata/global-metadata.dat'
+            metadata.parent.mkdir(parents=True)
+            for file in (metadata, game/'WarhammerSurvivors.exe', game/'UnityPlayer.dll', game/'GameAssembly.dll'):
+                file.touch()  # No executable in this fixture.
+            (apps/'libraryfolders.vdf').write_text('"libraryfolders"\n{\n"1"\n{\n"path" ' +
+                                                  json.dumps(str(library), ensure_ascii=False) + '\n}\n}', encoding='utf-8')
+            result = run_start(PACKAGE, 'Y', WSM_GAME='', WSM_STEAM_ROOT=str(root))  # EOF at selection.
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn('Steam game folder: ' + str(game), result.stdout)
+            self.assertNotIn('Owned game PID:', result.stdout)
 
 
 if __name__ == '__main__':

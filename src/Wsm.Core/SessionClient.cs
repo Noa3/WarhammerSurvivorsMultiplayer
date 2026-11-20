@@ -17,7 +17,10 @@ public sealed class SessionClient : IAsyncDisposable
     public PlayerName[] PlayerNames => (PlayerName[])Volatile.Read(ref playerNames).Clone();
     public SessionSettings Settings { get; }
     public LocalProgression Progression { get; }
-    private readonly Channel<RewardReceipt> rewards = Channel.CreateBounded<RewardReceipt>(new BoundedChannelOptions(128) { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true });
+    // At most one queued reference per unique ledger entry. A paused UI cannot
+    // disconnect a healthy client before the session's actual receipt limit.
+    private const int MaxReceivedRewards = 100_000;
+    private readonly Channel<RewardReceipt> rewards = Channel.CreateBounded<RewardReceipt>(new BoundedChannelOptions(MaxReceivedRewards) { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true });
     private readonly Dictionary<Guid, RewardReceipt> rewardStore = [];
     private readonly object rewardLock = new();
     public ChannelReader<RewardReceipt> Rewards => rewards.Reader;
@@ -83,13 +86,10 @@ public sealed class SessionClient : IAsyncDisposable
                             if (prior != reward) throw new InvalidDataException("Conflicting reward receipt.");
                             continue;
                         }
-                        if (rewardStore.Count >= 100_000) throw new InvalidDataException("Reward receipt capacity reached.");
+                        if (rewardStore.Count >= MaxReceivedRewards) throw new InvalidDataException("Reward receipt capacity reached.");
                         if (reward.Kind == RewardKind.Xp && !Progression.ApplyXp(reward.ReceiptId, PlayerId, reward.Amount)) throw new InvalidDataException("XP receipt already used outside reward channel.");
                         rewardStore.Add(reward.ReceiptId, reward);
-                        // The ledger records this receipt before notification. A full channel
-                        // still terminates the receive loop; the adapter reconciles the ledger
-                        // on teardown, but cannot promise continued session liveness.
-                        if (!rewards.Writer.TryWrite(reward)) throw new InvalidDataException("Reward channel full.");
+                        if (!rewards.Writer.TryWrite(reward)) throw new InvalidOperationException("Reward notification invariant violated.");
                     }
                 }
                 else throw new InvalidDataException("Invalid host message.");

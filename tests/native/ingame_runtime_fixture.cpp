@@ -8,6 +8,10 @@ extern "C" __declspec(dllexport) void __cdecl wsm_fixture_status(int value, int 
     current_state = value; peers = count; port = bound; failure = code;
 }
 #ifndef WSM_BINDING_NO_STATUS_DETAILS
+extern "C" __declspec(dllexport) int __cdecl wsm_ingame_host_rules(int p, int lan, int bots, int difficulty, int death) {
+    if (p != 7780 || lan != 1 || bots != 8 || difficulty != 2 || death != 1) return -1;
+    state = "fixture-configured-host"; return 0;
+}
 namespace { std::string player_name = "Player"; }
 int name_buffer(const std::string& text, unsigned char* buffer, int capacity) {
     char mode[32]{};
@@ -29,6 +33,11 @@ extern "C" __declspec(dllexport) int __cdecl wsm_ingame_local_player_name(unsign
 extern "C" __declspec(dllexport) int __cdecl wsm_ingame_player_names(unsigned char* buffer, int capacity) {
     return name_buffer(player_name + "\nScout", buffer, capacity);
 }
+#ifndef WSM_BINDING_NO_LAN_HINT
+extern "C" __declspec(dllexport) int __cdecl wsm_ingame_lan_hint(unsigned char* buffer, int capacity) {
+    return name_buffer("192.0.2.7:7780, 192.0.2.8:7780", buffer, capacity);
+}
+#endif
 extern "C" __declspec(dllexport) int __cdecl wsm_ingame_state() { return current_state; }
 extern "C" __declspec(dllexport) int __cdecl wsm_ingame_peer_count() { return peers; }
 extern "C" __declspec(dllexport) int __cdecl wsm_ingame_bound_port() { return port; }

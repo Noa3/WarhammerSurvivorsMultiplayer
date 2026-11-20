@@ -80,8 +80,12 @@ void refresh_player_name(Context& c, bool force = false) {
 }
 void host(void* raw, int port) { auto& c = *static_cast<Context*>(raw); refresh_player_name(c, true); command_result(c, c.runtime.host(port, true)); }
 void join(void* raw, const std::string& address, int port) { auto& c = *static_cast<Context*>(raw); refresh_player_name(c, true); command_result(c, c.runtime.join(address, port)); }
+void host_with_rules(void* raw, int port, wsm::HostRules rules) {
+    auto& c = *static_cast<Context*>(raw); refresh_player_name(c, true);
+    command_result(c, c.runtime.host(port, true, rules));
+}
 void leave(void* raw) { auto& c = *static_cast<Context*>(raw); command_result(c, c.runtime.leave()); }
-std::string status(void* raw, const std::string& language) { auto& c = *static_cast<Context*>(raw); return c.command_failed ? std::string(wsm::i18n::text(wsm::i18n::Text::ActionRejected, language)) : c.runtime.localized_status(language); }
+std::string status(void* raw, const std::string& language) { auto& c = *static_cast<Context*>(raw); return c.runtime.localized_status(language, true, c.command_failed); }
 std::string local_player_name(void* raw, const std::string&) {
     auto& c = *static_cast<Context*>(raw);
     const auto admitted = c.runtime.local_player_name();
@@ -182,6 +186,8 @@ void callback(void* raw) {
         tick_camera(c, identity);
         refresh_player_name(c);
         wsm::InGameMenuActions actions{&c, host, join, leave, status, camera_mode, camera_status};
+        actions.host_with_rules = host_with_rules;
+        actions.rules_editable = c.runtime.can_edit_host_rules();
         if (c.runtime.names_ready()) { actions.local_player_name = local_player_name; actions.player_names = player_names; }
         c.menu->tick(actions);
         const auto language = c.menu->language();

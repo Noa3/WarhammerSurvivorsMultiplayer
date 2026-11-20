@@ -2,6 +2,18 @@ using Wsm.Launcher;
 
 try
 {
+    if (OperatingSystem.IsWindows() && args is ["play-installed"])
+    {
+        var selected = SteamGameDirectory.Select(Environment.GetEnvironmentVariable("WSM_GAME"),
+            SteamGameDirectory.SteamRoots(), Console.In, Console.Out);
+        if (selected == null) return 1;
+        var local = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        if (string.IsNullOrWhiteSpace(local) || !Path.IsPathFullyQualified(local))
+            throw new ArgumentException("LOCALAPPDATA must be an absolute directory.");
+        var home = Path.Combine(local, "WarhammerSurvivorsMultiplayer");
+        var bridgeFile = Path.Combine(AppContext.BaseDirectory, "..", "bridge", "Wsm.Bridge.dll");
+        args = ["play", selected, Path.Combine(home, "cache"), bridgeFile, Path.Combine(home, "logs")];
+    }
     switch (args)
     {
         case ["play", var game, var cache, var bridge, var logs] when OperatingSystem.IsWindows():
@@ -35,6 +47,7 @@ try
             return 0;
         default:
             Console.WriteLine("Warhammer Survivors Multiplayer launcher and development tools");
+            Console.WriteLine("  play-installed (portable package; start via Start-WSM.cmd for the save warning)");
             Console.WriteLine("  play <game-directory> <cache-directory> <Wsm.Bridge.dll> <log-directory>\n  inspect <game-directory>\n  prepare <game-directory> <new-runtime-directory>\n  probe <runtime-directory> <Wsm.Bridge.dll> <log-directory>\n  ui-probe <runtime-directory> <Wsm.Bridge.dll> <log-directory>\n  coop-probe <runtime-directory> <Wsm.Bridge.dll> <log-directory>");
             return args.Length == 0 ? 0 : 2;
     }

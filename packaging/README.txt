@@ -8,12 +8,13 @@ Official installer: https://aka.ms/vc14/vc_redist.x64.exe
 The game and its normal Steam prerequisites must be obtained separately.
 
 Portable: extract the complete WSM folder to a clean location, then run
-WSM\Start-WSM.cmd. Enter your installed game folder and read the save warning.
-Normal saves, profile data and Steam Cloud are NOT isolated. Back up valuable
-saves before confirming. Open Co-op [F6] inside the launched game.
+WSM\Start-WSM.cmd. Normal saves, profile data and Steam Cloud are NOT isolated.
+Back up valuable saves before accepting the warning. Confirm the detected Steam
+installation if offered, or enter your game folder. Open Co-op [F6] in the game.
 
 Use only a trusted LAN or secured VPN: network data is unencrypted and the
-connection preview has no lobby password. Use IPv4 addresses; default port7780.
+connection preview has no lobby password. The host selects Host and shares their
+LAN IPv4 address and port (default 7780). The guest enters them and selects Join.
 Only permit necessary private-network firewall access, not public exposure.
 Cross-machine connectivity and gameplay input isolation are not certified.
 

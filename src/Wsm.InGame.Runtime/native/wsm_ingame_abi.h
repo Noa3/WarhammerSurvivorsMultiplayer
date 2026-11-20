@@ -52,9 +52,15 @@ extern "C" {
 
 int wsm_ingame_version(void);
 int wsm_ingame_host(int port, int lanBind);
+// Optional atomic host command: bots 0..8, difficulty easy/normal/hard = 0/1/2,
+// death all-dead/first-death = 0/1. Defaults of the frozen host call: 0,1,0.
+int wsm_ingame_host_rules(int port, int lanBind, int bots, int difficulty, int death);
 int wsm_ingame_join(const uint8_t* ipUtf8, int ipLength, int port);
 int wsm_ingame_leave(void);
 int wsm_ingame_status(uint8_t* buffer, int capacity);
+// Optional, status buffer convention. Up to two local IPv4:port candidates separated by ", ".
+// Empty unless hosting on LAN with a suitable interface; never sent to peers.
+int wsm_ingame_lan_hint(uint8_t* buffer, int capacity);
 // Optional display names: strict UTF-8 input, sanitized and frozen at queue time.
 // Getters use the status buffer convention; roster is host-first, newline-separated,
 // has no trailing newline, and is empty when disconnected. Names are not identity.
@@ -73,6 +79,10 @@ int wsm_ingame_shutdown(void);
 // submit accepts camelCase JSON with kind and positive requestId. Guests may
 // send input{x,y} or upgrade{level,choice}; identity is assigned by the session.
 // Hosts may send snapshot{snapshot:{tick,entities,enemies:[]}} or reward{reward:...}.
+// Source builds supporting botFrame also accept host-local bot observations. In that
+// case submission.botDecision is an intent for the supplied run/slot/tick/actor,
+// not an applied movement, hit, collection or upgrade. See ../README.md. Older
+// libraries reject this request kind; do not fall back to simulated positions.
 // Payload fields are flattened at the request root, except snapshot and reward.
 // poll(NULL,0) queries the next event length, 0 means none. Sufficient capacity
 // copies UTF-8+NUL and consumes it; -5 consumes nothing and leaves bytes alone.
@@ -99,9 +109,9 @@ int wsm_ingame_shutdown(void);
 // overflow can terminate the gameplay session, not silently drop choices. Lifecycle
 // backlog is bounded by 1024 known and 100000 departed player identities; it is
 // not capped at 512 and retains join/leave. The 100000 receipt ledger is bounded.
-// Core's separate 128-entry reward notification channel still terminates receive
-// on overflow; receipts already recorded in the ledger are reconciled, but session
-// liveness and rewards not yet accepted by Core are not guaranteed.
+// Core queues one notification per accepted unique ledger entry, up to the same
+// session limit. A guest pausing its consumer does not drop these notifications.
+// A socket loss can still interrupt rewards before they reach the guest.
 // Leave explicitly abandons queued data; host loss retains reliable events.
 // A new connection is refused while unconsumed retained reliable events exist.
 // Native callers must poll on their own bounded main-thread handoff, not call

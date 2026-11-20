@@ -6,10 +6,10 @@ An experimental Windows co-op project for **Warhammer Survivors**, with hosting 
 
 ## Try the in-game panel
 
-1. Download the complete repository ZIP or clone this repository.
-2. Open `distribution/win-x64/Start-WSM.cmd` and enter your installed Warhammer Survivors folder.
-3. Read the save warning and confirm the launch. The launcher prepares a separate installation copy and starts the game.
-4. Open **Co-op [F6]** inside the game. Enter an IPv4 address and port, then choose **Host**, **Join** or **Leave**.
+1. Download and extract the complete repository ZIP, or clone this repository. Both players should use the same build.
+2. Back up your saves. Open `distribution/win-x64/Start-WSM.cmd` and read the save warning. Choose `Y` only if you want to continue.
+3. Confirm your Steam installation if the launcher finds it, or enter your installed game folder when prompted. The launcher prepares a separate copy and starts the game.
+4. Open **Co-op [F6]** inside the game. The host chooses **Host** and shares their LAN IPv4 address and port. The guest enters those details and chooses **Join**. Neither player needs to leave the game window to connect.
 
 Keep the complete Windows package together. The packaged tools include their .NET runtime; Unity and development tools are not required to use them. The native bridge also requires the free [Microsoft Visual C++ x64 runtime](https://aka.ms/vc14/vc_redist.x64.exe), which may already be installed with the game. Your own installed game and its normal Steam prerequisites are required. Older tools-preview assets on [GitHub Releases](https://github.com/Noa3/WarhammerSurvivorsMultiplayer/releases) do not include this newer in-game interface.
 

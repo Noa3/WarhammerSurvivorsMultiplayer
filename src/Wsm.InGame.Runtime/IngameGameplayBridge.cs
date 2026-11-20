@@ -75,6 +75,12 @@ public sealed partial class IngameSessionController
     private static bool ValidSubmission(GameplayRequest r, Session session)
     {
         var plain = r.Snapshot is null && r.Reward is null;
+        if (r.Party is { } party)
+            return r.Kind == "soloParty" && session.Host is { ConnectedClients: 0 } solo && plain && r.Bot is null &&
+                r.X is null && r.Y is null && r.Level is null && r.Choice is null && party.Valid(solo.Settings.BotCount);
+        if (r.Bot is not null)
+            return r.Kind == "botFrame" && session.Host is { } owner && plain && r.X is null && r.Y is null &&
+                r.Level is null && r.Choice is null && r.Bot.Valid(owner.Settings.BotCount);
         if (session.Client is { } client)
             return r.Kind switch
             {
@@ -103,6 +109,8 @@ public sealed partial class IngameSessionController
             {
                 if (session.Abandoned) return;
                 string? error = null;
+                ObservedBotDecision? botDecision = null;
+                SoloPartyDecision? partyDecision = null;
                 try
                 {
                     if (session.Client is { } client)
@@ -113,6 +121,12 @@ public sealed partial class IngameSessionController
                     else if (session.Host is { } host)
                     {
                         if (request.Kind == "snapshot") await host.PublishSnapshotAsync(request.Snapshot!, session.Cancellation.Token).ConfigureAwait(false);
+                        else if (request.Party is { } party)
+                        {
+                            if (host.ConnectedClients != 0) throw new InvalidOperationException("Solo party requires no guests.");
+                            partyDecision = session.BotRoster.PlanParty(party, host.Settings.BotDifficulty);
+                        }
+                        else if (request.Bot is { } frame) botDecision = session.BotRoster.Plan(frame, host.Settings);
                         else host.PublishReward(request.Reward!.RecipientId, request.Reward);
                     }
                 }
@@ -122,7 +136,8 @@ public sealed partial class IngameSessionController
                     return;
                 }
                 catch (Exception ex) { error = ex.GetType().Name; }
-                session.Gameplay.Add("submission", session.Client?.PlayerId ?? Guid.Empty, requestId: request.RequestId, error: error);
+                session.Gameplay.Add("submission", session.Client?.PlayerId ?? Guid.Empty, requestId: request.RequestId, error: error,
+                    botDecision: botDecision, partyDecision: partyDecision);
             }
         }
         catch (OperationCanceledException) when (session.Cancellation.IsCancellationRequested) { }

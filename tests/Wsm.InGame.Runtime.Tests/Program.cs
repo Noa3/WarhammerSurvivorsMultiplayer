@@ -17,6 +17,12 @@ foreach (var (name, test) in new (string, Func<Task>)[]
 {
     ("player names roster over TCP", PlayerNamesTests.Roster),
     ("player names native ABI and frozen queue", PlayerNamesAbiTests.Run),
+    ("host rules arrive in guest welcome", HostRulesTests.Welcome),
+    ("observed bot decisions and personal offers", ObservedBotTests.Decisions),
+    ("observed bot host-role and observation guards", ObservedBotTests.Guards),
+    ("host rules cannot be changed by an admitted guest", HostRulesTests.GuestCannotEdit),
+    ("LAN hint candidate filters", LanHintTests.Filters),
+    ("LAN hint host ABI and guest admission", LanHintTests.Session),
     ("host and guest roundtrip with cleanup", HostAndGuestRoundtrip),
     ("mailbox reliable events survive continuous input", GameplayBridgeTests.MailboxFairness),
     ("idle reward polling avoids ledger allocation", GameplayBridgeTests.IdleRewardPollingAllocation),

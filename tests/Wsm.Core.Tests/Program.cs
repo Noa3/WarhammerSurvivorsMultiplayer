@@ -1,6 +1,7 @@
 using System.Net;
 using Wsm.Core;
 
+if (args is ["--bots"]) { await BotRegression.Run(); Console.WriteLine("PASS simulated host bots"); return; }
 if (args is ["--player-names"]) { await PlayerNamesRegression.Run(); return; }
 if (args is ["--send-context"]) { await SendContextRegression.Run(); return; }
 if (args is ["--reward-capacity"]) { await RewardCapacityRegression.Run(); return; }
@@ -8,7 +9,7 @@ if (args is ["--keepalive-context"]) { await BlockedContextRegression.Run(); ret
 if (args is ["--keepalive-idle"]) { await KeepaliveRegression.Idle(); return; }
 if (args is ["--keepalive"]) { await KeepaliveRegression.Run(); return; }
 if (args is ["--incoming-oversize"]) { await IncomingOversize(); return; }
-if (args.Length != 0) throw new ArgumentException("Supported filters: --player-names, --send-context, --reward-capacity, --keepalive-context, --keepalive-idle, --keepalive, --incoming-oversize");
+if (args.Length != 0) throw new ArgumentException("Supported filters: --bots, --player-names, --send-context, --reward-capacity, --keepalive-context, --keepalive-idle, --keepalive, --incoming-oversize");
 
 var player = Guid.NewGuid();
 var progress = new LocalProgression(player);
@@ -95,6 +96,8 @@ do { disconnected = await host.Disconnected.ReadAsync(timeout.Token); } while (d
 Check(!host.ConnectedPlayerIds.Contains(client.PlayerId), "disconnect cleanup");
 Console.WriteLine("PASS rules and protocol rejection");
 
+await BotRegression.Run();
+Console.WriteLine("PASS simulated host bots");
 var failures = new List<string>();
 foreach (var (name, test) in new (string, Func<Task>)[] { ("player names TCP roster", PlayerNamesRegression.Run), ("oversize incoming frame", IncomingOversize), ("oversize without peers", Oversize), ("malformed host JSON", MalformedHost), ("network failure regressions", NetworkRegression.Run), ("shared enemy health contract", SharedEnemyContract), ("shared encounter and private rewards", EncounterRegression.Run), ("snapshot encounter capacity", SnapshotSafetyRegression.Capacity), ("snapshot tick ordering", SnapshotSafetyRegression.TickOrder), ("team XP and replay", PolicyRegression.TeamXp), ("personal XP collection", PolicyRegression.PersonalXp), ("malformed policy", PolicyRegression.MalformedSettings), ("team partial enqueue retry", PolicyRegression.PartialEnqueue), ("reward capacity atomicity", RewardCapacityRegression.Run), ("keepalive TCP regressions", KeepaliveRegression.Run) })
 {

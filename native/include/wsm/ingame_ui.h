@@ -1,4 +1,5 @@
 #pragma once
+#include "wsm/host_rules.h"
 #include "wsm/il2cpp_api.h"
 #include <memory>
 #include <string>
@@ -14,6 +15,8 @@ struct InGameMenuActions {
     std::string (*camera_status)(void*, const std::string& language) = nullptr;
     std::string (*local_player_name)(void*, const std::string& language) = nullptr;
     std::string (*player_names)(void*, const std::string& language) = nullptr;
+    void (*host_with_rules)(void*, int port, HostRules rules) = nullptr;
+    bool rules_editable = false;
 };
 
 // All operations, including destruction, must run on the verified Unity main thread.

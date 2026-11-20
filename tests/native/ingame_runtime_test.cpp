@@ -25,6 +25,12 @@ int main(int argc, char** argv) {
     if (runtime.host(-1, false) >= 0 || runtime.host(65536, false) >= 0 ||
         runtime.join("https://127.0.0.1", 7780) >= 0 || runtime.join("127.0.0.1", 0) >= 0) return 1;
     if (runtime.host(7780, false) != 0 || runtime.status() != "fixture-host-request") return 1;
+    if (std::strcmp(argv[2], "legacy") == 0) {
+        if (runtime.can_edit_host_rules() || runtime.host(7780, true, {}) != 0 ||
+            runtime.host(7780, true, {0, 2, 0}) >= 0 || runtime.host(7780, true, {1, 1, 0}) >= 0 ||
+            runtime.host(7780, true, {0, 1, 1}) >= 0) return 1;
+    } else if (!runtime.can_edit_host_rules() || runtime.host(7780, true, {8, 2, 1}) != 0 ||
+        runtime.status() != "fixture-configured-host") return 1;
     if (runtime.join("127.0.0.1", 7780) != 0 || runtime.status() != "fixture-join-request") return 1;
     if (runtime.leave() != 0 || runtime.status() != "fixture-left") return 1;
     SetEnvironmentVariableA("WSM_BINDING_OVERSIZE", "1");

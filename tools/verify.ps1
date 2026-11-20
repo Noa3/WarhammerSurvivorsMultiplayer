@@ -25,6 +25,8 @@ try {
     Invoke-Checked python @("$root/tests/Wsm.InGame.Runtime.Tests/dll/run_dll_tests.py", '--dll', "$root/artifacts/ingame-runtime/Wsm.InGame.Runtime.dll")
     Invoke-Checked python @("$root/tests/Wsm.InGame.Runtime.Tests/dll/lifecycle_test.py", '--dll', "$root/artifacts/ingame-runtime/Wsm.InGame.Runtime.dll")
     Invoke-Checked python @("$root/tests/Wsm.InGame.Runtime.Tests/dll/gameplay_bridge_test.py", '--dll', "$root/artifacts/ingame-runtime/Wsm.InGame.Runtime.dll")
+    Invoke-Checked python @("$root/tests/Wsm.InGame.Runtime.Tests/dll/observed_bots_test.py", '--dll', "$root/artifacts/ingame-runtime/Wsm.InGame.Runtime.dll")
+    Invoke-Checked python @("$root/tests/Wsm.InGame.Runtime.Tests/dll/solo_party_test.py", '--dll', "$root/artifacts/ingame-runtime/Wsm.InGame.Runtime.dll")
     Invoke-Checked python @("$root/tests/Wsm.InGame.Runtime.Tests/dll/run_names_tests.py", '--dll', "$root/artifacts/ingame-runtime/Wsm.InGame.Runtime.dll")
     Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.Lobby.Tests', '-c', 'Release', '--no-build')
     Invoke-Checked dotnet @('run', '--project', 'tests/Wsm.App.Smoke', '-c', 'Release', '--no-build')

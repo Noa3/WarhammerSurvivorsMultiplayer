@@ -9,12 +9,12 @@ internal sealed record GameplayRequest(
     [property: JsonRequired] string Kind,
     [property: JsonRequired] long RequestId,
     float? X = null, float? Y = null, int? Level = null, string? Choice = null,
-    WorldSnapshot? Snapshot = null, RewardReceipt? Reward = null);
+    WorldSnapshot? Snapshot = null, RewardReceipt? Reward = null, ObservedBotFrame? Bot = null, SoloPartyFrame? Party = null);
 
 internal sealed record GameplayEvent(int Epoch, long EventId, string Kind, Guid PlayerId,
     long RequestId = 0, long AgeMilliseconds = 0, PlayerInput? Input = null,
     UpgradeChoice? Upgrade = null, WorldSnapshot? Snapshot = null, RewardReceipt? Reward = null,
-    string? Error = null);
+    string? Error = null, ObservedBotDecision? BotDecision = null, SoloPartyDecision? PartyDecision = null);
 internal sealed record GameplayInfo(int Epoch, string Role, Guid PlayerId, bool Active, string? Error);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
@@ -65,7 +65,8 @@ internal sealed class GameplayMailbox(int epoch)
     }
     internal void Unreserve(long requestId) { lock (gate) pendingRequests.Remove(requestId); }
     internal void Add(string kind, Guid player, PlayerInput? input = null, UpgradeChoice? upgrade = null,
-        WorldSnapshot? world = null, RewardReceipt? reward = null, long requestId = 0, string? error = null)
+        WorldSnapshot? world = null, RewardReceipt? reward = null, long requestId = 0, string? error = null,
+        ObservedBotDecision? botDecision = null, SoloPartyDecision? partyDecision = null)
     {
         lock (gate)
         {
@@ -93,7 +94,7 @@ internal sealed class GameplayMailbox(int epoch)
                 return;
             }
             var frame = new GameplayEvent(epoch, checked(++nextId), kind, player, RequestId: requestId,
-                Input: input, Upgrade: upgrade, Snapshot: world, Reward: reward, Error: error);
+                Input: input, Upgrade: upgrade, Snapshot: world, Reward: reward, Error: error, BotDecision: botDecision, PartyDecision: partyDecision);
             if (input is not null)
             {
                 if (!inputs.ContainsKey(player) && inputs.Count >= MaxInputOwners) throw new InvalidOperationException("Gameplay input owner capacity reached.");

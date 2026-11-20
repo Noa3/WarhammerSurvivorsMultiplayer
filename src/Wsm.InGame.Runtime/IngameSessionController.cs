@@ -20,7 +20,7 @@ public enum TransitionResult
 /// Every public method is safe to call from the Unity main thread: connection setup and all
 /// receive loops run on background tasks, and <see cref="Status"/> is an immutable snapshot.
 /// The type exposes bounded gameplay mailboxes, but never calls engine APIs,
-/// starts gameplay, ticks encounters or executes bots itself.
+/// starts gameplay or applies bot decisions to engine actors.
 /// </summary>
 public sealed partial class IngameSessionController : IAsyncDisposable
 {
@@ -54,6 +54,10 @@ public sealed partial class IngameSessionController : IAsyncDisposable
 
     /// <summary>Most recent immutable status. Polling this from any thread is safe.</summary>
     public IngameStatus Status => Volatile.Read(ref current);
+    internal byte[] LanHint
+    {
+        get { lock (gate) return current.State == IngameState.Hosting && active is { } session ? session.LanHint : []; }
+    }
     /// <summary>Connected human display names, host first; no gameplay events are consumed.</summary>
     public string PlayerNames
     {
@@ -84,10 +88,12 @@ public sealed partial class IngameSessionController : IAsyncDisposable
         public int Generation { get; } = generation;
         public string Name { get; } = name;
         public GameplayMailbox Gameplay { get; } = new(generation);
+        public ObservedBotRoster BotRoster { get; } = new();
         public Channel<GameplayRequest> GameplayOutgoing { get; } = Channel.CreateBounded<GameplayRequest>(
             new BoundedChannelOptions(32) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true });
         public CancellationTokenSource Cancellation { get; } = new();
         public SessionHost? Host { get; set; }
+        public byte[] LanHint { get; set; } = [];
         public SessionClient? Client { get; set; }
         public Task Pump { get; set; } = Task.CompletedTask;
         public object ReleaseGate { get; } = new();
@@ -103,9 +109,12 @@ public sealed partial class IngameSessionController : IAsyncDisposable
 
     /// <summary>Starts hosting. A port of 0 binds an ephemeral port; the result is in <see cref="Status"/>.</summary>
     public Task<TransitionResult> HostAsync(int port, bool bindToLan, CancellationToken token = default, string? displayName = null) =>
-        Task.Run(() => { BeforeOperationStart?.Invoke(); return HostCoreAsync(port, bindToLan, token, DisplayNames.Sanitize(displayName)); });
+        HostAsync(port, bindToLan, token, displayName, null);
 
-    private async Task<TransitionResult> HostCoreAsync(int port, bool bindToLan, CancellationToken token, string displayName)
+    internal Task<TransitionResult> HostAsync(int port, bool bindToLan, CancellationToken token, string? displayName, SessionSettings? requested) =>
+        Task.Run(() => { BeforeOperationStart?.Invoke(); return HostCoreAsync(port, bindToLan, token, DisplayNames.Sanitize(displayName), requested ?? settings); });
+
+    private async Task<TransitionResult> HostCoreAsync(int port, bool bindToLan, CancellationToken token, string displayName, SessionSettings hostSettings)
     {
         if (port is < 0 or > 65535) return TransitionResult.InvalidArgument;
         if (Volatile.Read(ref disposed) != 0) return TransitionResult.Failed;
@@ -128,9 +137,10 @@ public sealed partial class IngameSessionController : IAsyncDisposable
             try
             {
                 token.ThrowIfCancellationRequested();
-                var host = new SessionHost(settings, SessionPassword, port, bindToLan ? IPAddress.Any : IPAddress.Loopback, displayName);
+                var host = new SessionHost(hostSettings, SessionPassword, port, bindToLan ? IPAddress.Any : IPAddress.Loopback, displayName);
                 session.Host = host; // Own the object even when Start or the admission step fails.
                 host.Start();
+                if (bindToLan) session.LanHint = LanEndpointHint.Discover(host.Port);
                 BeforeResourceCommit?.Invoke();
                 bool owned;
                 bool cancelled;
